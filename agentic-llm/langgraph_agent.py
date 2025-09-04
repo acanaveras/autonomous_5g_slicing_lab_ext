@@ -95,15 +95,17 @@ def compile_workflow(graph, img_name="./images/langgraph_DLI.png"):
         print("Saved graph image as ", img_name)
     return workflow
 
+from langchain_core.runnables.graph import MermaidDrawMethod
+from IPython.display import Image, display
+
 def display_graph(workflow):
     try:
         print(workflow.get_graph())
-        display(Image(workflow.get_graph().draw_mermaid_png()))
+        display(Image(workflow.get_graph().draw_mermaid_png(draw_method=MermaidDrawMethod.PYPPETEER)))
         # print("SUCCESS")
     except Exception as e:
         print("ERROR IN GRAPH")
         print(e)
-
 def main():
     graph = create_graph()
     workflow = compile_workflow(graph)
