@@ -32,6 +32,13 @@ Successfully updated the repository configuration to use a local Kinetica instan
 - Provides clear instructions for starting the local instance
 - Lists all local Kinetica access points
 
+### 5. Created Test Notebook
+**File: `test_kinetica.ipynb`**
+- Comprehensive test notebook for local Kinetica connectivity and operations
+- Tests connection, schema operations, table creation/deletion, data insertion, and queries
+- Includes troubleshooting guide and detailed error handling
+- Provides visual feedback and progress indicators
+
 ## Local Kinetica Configuration
 
 ### Connection Details
@@ -77,6 +84,7 @@ Open http://localhost:8080/gadmin in your browser and login with:
 - `agentic-llm/chatbot_DLI.py`
 - `README.md`
 - `setup_local_kinetica.py` (new file)
+- `test_kinetica.ipynb` (new file)
 
 ## Verification
 All references to the remote Kinetica instance (`demo72.kinetica.com`) have been replaced with local configuration. The notebooks and agentic files are now configured to use the local instance that runs with the provided `run_kinetica_headless.sh` script.
