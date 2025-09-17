@@ -34,7 +34,11 @@ logging.basicConfig(
     format="%(message)s"  # Only log the message
 )
 
-load_dotenv("../llm-slicing-5g-lab/.env")
+# Configure for local Kinetica instance
+os.environ["KINETICA_HOST"] = "localhost:9191"
+os.environ["KINETICA_USERNAME"] = "admin"
+os.environ["KINETICA_PASSWORD"] = "Admin123!"
+os.environ["KINETICA_SCHEMA"] = "nvidia_gtc_dli_2025"
 
 kdbc_options = gpudb.GPUdb.Options()
 kdbc_options.username = os.environ.get("KINETICA_USERNAME")

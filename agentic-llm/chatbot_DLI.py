@@ -68,7 +68,12 @@ WINDOW_SIZE_SECONDS = 60
 process = None
 logs = []
 
-load_dotenv("../llm-slicing-5g-lab/.env")
+# Configure for local Kinetica instance
+os.environ["KINETICA_HOST"] = "localhost:9191"
+os.environ["KINETICA_USERNAME"] = "admin"
+os.environ["KINETICA_PASSWORD"] = "Admin123!"
+os.environ["KINETICA_SCHEMA"] = "nvidia_gtc_dli_2025"
+
 kdbc_options = GPUdb.Options()
 kdbc_options.username = os.environ.get("KINETICA_USERNAME")
 kdbc_options.password = os.environ.get("KINETICA_PASSWORD")
@@ -79,7 +84,6 @@ kdbc: GPUdb = GPUdb(
 )
 
 def generate_sql_query(ue:str):
-    load_dotenv("../llm-slicing-5g-lab/.env")
     return f"""
             SELECT
                 "timestamp",

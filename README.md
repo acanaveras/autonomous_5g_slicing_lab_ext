@@ -72,7 +72,7 @@ After running the shutdown notebook, you can restart the lab by re-running `DLI_
 
 - **Execution Order**: Complete the lab setup before running the agentic workflow. The shutdown notebook can be used at any time to reset the environment.
 - **Monitoring**: Check logs in `autonomous_5g_slicing_lab/llm-slicing-5g-lab/logs/` for debugging (e.g., `RIC.log`, `UE1.log`, `UE1_iperfc.log`).
-- **Kinetica Access**: Use the credentials in `autonomous_5g_slicing_lab/llm-slicing-5g-lab/.env` (e.g., `KINETICA_USERNAME=nvidia_gtc_2025`, `KINETICA_PASSWORD=Kinetica123!`) to access the Kinetica database at `https://demo72.kinetica.com/gadmin/`.
+- **Kinetica Access**: The lab is configured to use a local Kinetica instance. Start the local instance with `./run_kinetica_headless.sh` and access it at `http://localhost:8080/gadmin/` with credentials `KINETICA_USERNAME=admin`, `KINETICA_PASSWORD=Admin123!`.
 - **Network Configuration**: The notebooks assume specific IP addresses (e.g., `12.1.1.2`, `192.168.70.135`). Modify these in the notebooks if your setup differs.
 - **Environment**: The lab is designed for a controlled DLI environment. For personal machines, ensure all dependencies and the full repository directory are available.
 
