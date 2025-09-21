@@ -66,20 +66,10 @@ chmod +x start_grafana_services.sh
 ./start_grafana_services.sh
 ```
 
-**On Windows:**
-```cmd
-start_grafana_services.bat
-```
 
-This will:
-- Stop any existing containers
-- Start Grafana (http://localhost:9002) and InfluxDB (http://localhost:9001)
-- Provision the dashboard and datasource automatically
-
-### 4. Verify Services
-- Graphana Services are running in the following ports. Please make sure you are exposing these ports in your environment.
+### 4. Verify service is running 
 - **Grafana**: [http://localhost:9002](http://localhost:9002) (Press "Skip" to avoid the user and password authentication)
-- **InfluxDB**: [http://localhost:9001](http://localhost:9001)
+
 
 ### 5. Get Variable for Dashboard in Graphana
 - **Go to **Grafana**: [http://localhost:9002](http://localhost:9002)
