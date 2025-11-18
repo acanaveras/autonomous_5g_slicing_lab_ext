@@ -1,0 +1,154 @@
+# SPDX-FileCopyrightText: Copyright (c) 2023-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Dockerfile for OpenAirInterface gNodeB with E2 support
+# Builds from slicing-spring-of-code branch with FlexRIC integration
+#
+#---------------------------------------------------------------------
+# BUILDER IMAGE
+#---------------------------------------------------------------------
+ARG BASE_IMAGE=ubuntu:22.04
+
+FROM $BASE_IMAGE AS gnb-base
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe/Paris
+
+# Install build dependencies
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes && \
+    DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+       build-essential \
+       cmake \
+       ninja-build \
+       git \
+       wget \
+       libsctp-dev \
+       libconfig++-dev \
+       libatlas-base-dev \
+       liblapacke-dev \
+       libboost-all-dev \
+       python3 \
+       python3-pip \
+       gcc-12 \
+       g++-12 \
+       libusb-1.0-0-dev \
+       libuhd-dev \
+       uhd-host \
+       net-tools \
+       iproute2 \
+       iputils-ping \
+       iperf3 \
+       libyaml-cpp-dev \
+       libgtest-dev \
+       googletest && \
+    apt-get clean
+
+# Set gcc-12 as default
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
+
+#---------------------------------------------------------------------
+# BUILD OPENAIRINTERFACE
+#---------------------------------------------------------------------
+FROM gnb-base AS gnb-builder
+
+WORKDIR /workspace
+
+# Clone OpenAirInterface 5G from specific branch
+RUN git clone https://gitlab.eurecom.fr/oai/openairinterface5g.git && \
+    cd openairinterface5g && \
+    git checkout slicing-spring-of-code
+
+WORKDIR /workspace/openairinterface5g
+
+# Install dependencies
+RUN cd cmake_targets && \
+    ./build_oai -I
+
+# Build gNodeB and nrUE with E2 support and RF simulator
+RUN cd cmake_targets && \
+    ./build_oai -c -C -w SIMU --gNB --nrUE --build-e2 --ninja && \
+    echo "--- Build completed ---" && \
+    ls -lh ran_build/build/nr-softmodem && \
+    echo "--- Checking nr-softmodem dependencies ---" && \
+    ldd ran_build/build/nr-softmodem | head -30
+
+#---------------------------------------------------------------------
+# TARGET IMAGE
+#---------------------------------------------------------------------
+FROM $BASE_IMAGE AS oai-gnb
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe/Paris
+
+# Install runtime dependencies only
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes && \
+    DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+       libsctp1 \
+       libconfig9 \
+       libconfig++9v5 \
+       libatlas3-base \
+       liblapacke \
+       libboost-chrono1.74.0 \
+       libboost-date-time1.74.0 \
+       libboost-filesystem1.74.0 \
+       libboost-program-options1.74.0 \
+       libboost-regex1.74.0 \
+       libboost-serialization1.74.0 \
+       libboost-system1.74.0 \
+       libboost-thread1.74.0 \
+       libusb-1.0-0 \
+       libuhd4.1.0 \
+       net-tools \
+       iproute2 \
+       iputils-ping \
+       iperf3 \
+       procps \
+       python3 \
+       python3-six \
+       python3-requests \
+       coreutils && \
+    apt-get autoremove -y && \
+    apt-get autoclean -y
+
+WORKDIR /opt/oai-gnb
+
+# Copy gNodeB binary
+COPY --from=gnb-builder \
+    /workspace/openairinterface5g/cmake_targets/ran_build/build/nr-softmodem \
+    /opt/oai-gnb/bin/nr-softmodem
+
+# Copy required shared libraries (use wildcards for flexibility)
+COPY --from=gnb-builder \
+    /workspace/openairinterface5g/cmake_targets/ran_build/build/*.so \
+    /usr/local/lib/
+
+# Update library cache and verify dependencies
+RUN ldconfig && \
+    echo "--- Verifying nr-softmodem dependencies ---" && \
+    ldd /opt/oai-gnb/bin/nr-softmodem
+
+# Create necessary directories
+RUN mkdir -p /opt/oai-gnb/etc && \
+    mkdir -p /opt/oai-gnb/logs && \
+    mkdir -p /usr/local/lib/flexric
+
+# Copy FlexRIC Service Module libraries
+COPY docker/flexric-sm/*.so /usr/local/lib/flexric/
+
+# Expose ports
+# NGAP (N2 interface to AMF)
+EXPOSE 38412/sctp
+# GTP-U (N3 interface to UPF)
+EXPOSE 2152/udp
+# E2 interface to RIC
+EXPOSE 36421/sctp
+
+# Set LD_LIBRARY_PATH
+ENV LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
+
+WORKDIR /opt/oai-gnb
+
+# Default command (will be overridden by docker-compose)
+CMD ["/opt/oai-gnb/bin/nr-softmodem"]

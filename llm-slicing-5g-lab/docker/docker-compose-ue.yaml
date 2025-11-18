@@ -1,0 +1,126 @@
+version: '3.8'
+
+services:
+  oai-ue-slice1:
+    container_name: oai-ue-slice1
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.ue
+    image: oai-ue-5g-slicing:latest
+    hostname: oai-ue-slice1
+    privileged: true
+    environment:
+      - TZ=Europe/Paris
+      - RFSIMULATOR=server
+      - FULL_IMSI=001010000000001
+      - FULL_KEY=fec86ba6eb707ed08905757b1bb44b8f
+      - OPC=C42449363BBAD02B66D16BC975D77CC1
+      - DNN=oai
+      - NSSAI_SST=1
+      - NSSAI_SD=0x000001
+      - USE_ADDITIONAL_OPTIONS=--sa --rfsim --log_config.global_log_level info
+    volumes:
+      # Mount UE configuration
+      - ./ue-slice1.conf:/opt/oai-ue/etc/ue.conf:ro
+      - ./channelmod_rfsimu.conf:/opt/oai-ue/etc/channelmod_rfsimu.conf:ro
+      # Mount logs directory
+      - ../logs:/opt/oai-ue/logs
+    networks:
+      demo-oai-public-net:
+        ipv4_address: 192.168.70.160
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "nr-uesoftmodem"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+    command: >
+      /bin/bash -c "
+      echo 'Starting UE for Slice 1...';
+      echo 'Configuration: /opt/oai-ue/etc/ue.conf';
+      echo 'IMSI: 001010000000001';
+      echo 'DNN: oai (Slice 1)';
+      echo 'Connecting to gNodeB at 192.168.70.151:4043';
+      /opt/oai-ue/bin/nr-uesoftmodem
+      -O /opt/oai-ue/etc/ue.conf
+      --sa
+      --rfsim
+      --rfsimulator.serveraddr 192.168.70.151
+      --numerology 1
+      --band 78
+      -C 3619200000
+      -r 106
+      --log_config.global_log_level info
+      2>&1 | tee /opt/oai-ue/logs/UE_slice1_docker.log
+      "
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  oai-ue-slice2:
+    container_name: oai-ue-slice2
+    image: oai-ue-5g-slicing:latest
+    hostname: oai-ue-slice2
+    privileged: true
+    environment:
+      - TZ=Europe/Paris
+      - RFSIMULATOR=server
+      - FULL_IMSI=001010000000002
+      - FULL_KEY=fec86ba6eb707ed08905757b1bb44b8f
+      - OPC=C42449363BBAD02B66D16BC975D77CC1
+      - DNN=oai2
+      - NSSAI_SST=1
+      - NSSAI_SD=0x000005
+      - USE_ADDITIONAL_OPTIONS=--sa --rfsim --log_config.global_log_level info
+    volumes:
+      # Mount UE configuration
+      - ./ue-slice2.conf:/opt/oai-ue/etc/ue.conf:ro
+      - ./channelmod_rfsimu.conf:/opt/oai-ue/etc/channelmod_rfsimu.conf:ro
+      # Mount logs directory
+      - ../logs:/opt/oai-ue/logs
+    networks:
+      demo-oai-public-net:
+        ipv4_address: 192.168.70.161
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "nr-uesoftmodem"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+    command: >
+      /bin/bash -c "
+      echo 'Starting UE for Slice 2...';
+      echo 'Configuration: /opt/oai-ue/etc/ue.conf';
+      echo 'IMSI: 001010000000002';
+      echo 'DNN: oai2 (Slice 2)';
+      echo 'Connecting to gNodeB at 192.168.70.151:4043';
+      /opt/oai-ue/bin/nr-uesoftmodem
+      -O /opt/oai-ue/etc/ue.conf
+      --sa
+      --rfsim
+      --rfsimulator.serveraddr 192.168.70.151
+      --numerology 1
+      --band 78
+      -C 3619200000
+      -r 106
+      --log_config.global_log_level info
+      2>&1 | tee /opt/oai-ue/logs/UE_slice2_docker.log
+      "
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  demo-oai-public-net:
+    external: true
+    name: demo-oai-public-net

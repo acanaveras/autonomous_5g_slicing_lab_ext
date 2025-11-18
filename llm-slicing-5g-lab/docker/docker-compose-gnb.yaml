@@ -1,0 +1,104 @@
+version: '3.8'
+
+services:
+  oai-gnb:
+    container_name: oai-gnb
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.gnb
+    image: oai-gnb-5g-slicing:latest
+    hostname: oai-gnb
+    privileged: true
+    environment:
+      - TZ=Europe/Paris
+      - USE_SA_TDD_MONO=yes
+      - GNB_NAME=gNB-OAI
+      - MCC=001
+      - MNC=01
+      - MNC_LENGTH=2
+      - TAC=1
+      - NSSAI_SST_0=1
+      - NSSAI_SD_0=0x000001
+      - NSSAI_SST_1=1
+      - NSSAI_SD_1=0x000005
+      - AMF_IP_ADDRESS=192.168.70.132
+      - GNB_NGA_IF_NAME=eth0
+      - GNB_NGA_IP_ADDRESS=192.168.70.151
+      - GNB_NGU_IF_NAME=eth0
+      - GNB_NGU_IP_ADDRESS=192.168.70.151
+      - E2_AGENT_ENABLED=yes
+      - E2_NEAR_RIC_IP=192.168.70.150
+      - USE_ADDITIONAL_OPTIONS=--sa --rfsim -E --gNBs.[0].min_rxtxtime 6 --log_config.global_log_level info
+    volumes:
+      # Mount gNodeB configuration
+      - ./gnb-docker.conf:/opt/oai-gnb/etc/gnb.conf:ro
+      # Mount logs directory
+      - ../logs:/opt/oai-gnb/logs
+    networks:
+      demo-oai-public-net:
+        ipv4_address: 192.168.70.151
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "nr-softmodem"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+    command: >
+      /bin/bash -c "
+      echo 'Starting gNodeB with E2 support...';
+      echo 'Configuration: /opt/oai-gnb/etc/gnb.conf';
+      echo 'AMF IP: 192.168.70.132';
+      echo 'FlexRIC IP: 192.168.70.150';
+      /opt/oai-gnb/bin/nr-softmodem
+      -O /opt/oai-gnb/etc/gnb.conf
+      --sa
+      --rfsim
+      -E
+      --gNBs.[0].min_rxtxtime 6
+      --log_config.global_log_level info
+      2>&1 | tee /opt/oai-gnb/logs/gNodeB_docker.log
+      "
+    depends_on:
+      - flexric
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  flexric:
+    container_name: flexric
+    image: flexric-5g-slicing:latest
+    hostname: flexric
+    environment:
+      - TZ=Europe/Paris
+      - SLICE1_RATIO=50
+      - SLICE2_RATIO=50
+    volumes:
+      - ../logs:/flexric/logs
+    networks:
+      demo-oai-public-net:
+        ipv4_address: 192.168.70.150
+    privileged: false
+    cap_add:
+      - NET_ADMIN
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "nearRT-RIC"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  demo-oai-public-net:
+    external: true
+    name: demo-oai-public-net
