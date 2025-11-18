@@ -132,23 +132,15 @@ if docker inspect "oai-ue-slice2" &>/dev/null && [ "$(docker inspect --format='{
 fi
 echo ""
 
-# Monitoring & Visualization Stack
-echo -e "${BLUE}═══ Monitoring & Visualization ═══${NC}"
-check_container "influxdb" "InfluxDB (Metrics Database)"
-check_container "grafana" "Grafana (Dashboards)"
-check_container "kinetica" "Kinetica (Analytics Database)"
-check_container "streamlit" "Streamlit (Web UI)"
-echo ""
-
 # Container Resource Usage
 echo -e "${BLUE}═══ Resource Usage ═══${NC}"
-docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" | grep -E "NAME|oai-|flexric|influx|grafana|kinetica|streamlit" | head -15
+docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" | grep -E "NAME|oai-|flexric" | head -10
 echo ""
 
 # Quick Summary
 echo -e "${BLUE}═══ Quick Summary ═══${NC}"
-total_containers=$(docker ps -a --filter "name=oai-" --filter "name=flexric" --filter "name=mysql" --filter "name=influx" --filter "name=grafana" --filter "name=kinetica" --filter "name=streamlit" | wc -l)
-running_containers=$(docker ps --filter "name=oai-" --filter "name=flexric" --filter "name=mysql" --filter "name=influx" --filter "name=grafana" --filter "name=kinetica" --filter "name=streamlit" | wc -l)
+total_containers=$(docker ps -a --filter "name=oai-" --filter "name=flexric" --filter "name=mysql" | wc -l)
+running_containers=$(docker ps --filter "name=oai-" --filter "name=flexric" --filter "name=mysql" | wc -l)
 echo "Total lab containers: $((total_containers - 1))"  # Subtract header line
 echo "Running containers: $((running_containers - 1))"
 echo ""
@@ -159,16 +151,8 @@ if [ "$((running_containers - 1))" -lt 10 ]; then
 elif [ "$((running_containers - 1))" -gt 0 ]; then
     echo -e "${GREEN}✓ Lab is operational!${NC}"
     echo ""
-    echo "5G Network:"
+    echo "Useful commands:"
     echo "  - View logs: docker logs -f <container-name>"
     echo "  - Test UE connectivity: docker exec oai-ue-slice1 ping -I oaitun_ue1 -c 4 8.8.8.8"
-    echo ""
-    echo "Monitoring & Visualization:"
-    echo "  - Streamlit UI: http://localhost:8501"
-    echo "  - Grafana: http://localhost:9002 (admin/admin)"
-    echo "  - InfluxDB: http://localhost:9001"
-    echo "  - Kinetica Workbench: http://localhost:8000 (admin/Admin123!)"
-    echo ""
-    echo "Management:"
     echo "  - Stop lab: ./lab_stop.sh"
 fi

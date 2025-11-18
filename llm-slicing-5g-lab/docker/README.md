@@ -57,6 +57,12 @@ The lab consists of the following Docker-based components:
 - **UE Slice 1**: Connected to Slice 1 (DNN: oai)
 - **UE Slice 2**: Connected to Slice 2 (DNN: oai2)
 
+### Monitoring & Visualization
+- **InfluxDB**: Time-series metrics database for network KPIs
+- **Grafana**: Interactive dashboards for real-time visualization
+- **Kinetica**: High-performance analytics database for traffic logs
+- **Streamlit**: Web-based UI for integrated monitoring and control
+
 ## Quick Start
 
 ### Prerequisites
@@ -131,6 +137,12 @@ This displays:
 ./build_ue.sh
 ```
 
+### Streamlit UI
+```bash
+./build_streamlit.sh
+```
+*Note: InfluxDB, Grafana, and Kinetica use pre-built official images*
+
 ## Network Configuration
 
 ### Docker Network
@@ -141,6 +153,10 @@ This displays:
 ### IP Assignments
 - gNodeB: `192.168.70.151`
 - FlexRIC: `192.168.70.152`
+- InfluxDB: `192.168.70.170`
+- Grafana: `192.168.70.171`
+- Kinetica: `192.168.70.172`
+- Streamlit: `192.168.70.173`
 - Core Network components: `192.168.70.128-150`
 - UEs: Use host networking with dynamic IPs from 5G Core
 
@@ -157,6 +173,14 @@ This displays:
 - **DNN**: oai2
 - **UE**: IMSI 001010000000002
 - **Characteristics**: Separate slice with independent resources
+
+## Accessing Services
+
+### Monitoring & Visualization
+- **Streamlit UI**: http://localhost:8501 - Main dashboard with embedded Grafana
+- **Grafana**: http://localhost:9002 (admin/admin) - Real-time metrics visualization
+- **InfluxDB**: http://localhost:9001 - Time-series metrics database
+- **Kinetica Workbench**: http://localhost:8000 (admin/Admin123!) - Analytics database
 
 ## Testing
 
@@ -241,13 +265,16 @@ docker/
 ├── build_flexric.sh                   # FlexRIC build script
 ├── build_gnb.sh                       # gNodeB build script
 ├── build_ue.sh                        # UE build script
+├── build_streamlit.sh                 # Streamlit UI build script
 │
 ├── Dockerfile.flexric                 # FlexRIC container image
 ├── Dockerfile.gnb                     # gNodeB container image
 ├── Dockerfile.ue                      # UE container image
+├── Dockerfile.streamlit               # Streamlit UI container image
 │
 ├── docker-compose-gnb.yaml            # FlexRIC + gNodeB orchestration
 ├── docker-compose-ue-host.yaml        # UE orchestration (host networking)
+├── docker-compose-monitoring.yaml     # Monitoring stack orchestration
 │
 ├── gnb-docker.conf                    # gNodeB configuration
 ├── ue-slice1.conf                     # UE Slice 1 configuration

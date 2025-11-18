@@ -157,15 +157,29 @@ else
 fi
 echo ""
 
-# Step 8: Display system status
-log "Step 8: System Status Summary"
-echo ""
-echo "Running Containers:"
-docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "NAME|oai-|flexric"
+# Step 8: Start Monitoring Stack (Optional)
+log "Step 8: Starting Monitoring Stack (InfluxDB, Grafana, Kinetica, Streamlit)..."
+if docker-compose -f docker-compose-monitoring.yaml up -d >> "$LOG_FILE" 2>&1; then
+    log "Monitoring services starting..."
+    wait_for_healthy "influxdb" 60
+    wait_for_healthy "grafana" 60
+    wait_for_healthy "kinetica" 180
+    wait_for_healthy "streamlit" 60
+    log_success "Monitoring Stack is running"
+else
+    log_warning "Failed to start monitoring stack, continuing without it..."
+fi
 echo ""
 
-# Step 9: Quick connectivity test
-log "Step 9: Testing UE connectivity..."
+# Step 9: Display system status
+log "Step 9: System Status Summary"
+echo ""
+echo "Running Containers:"
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "NAME|oai-|flexric|influx|grafana|kinetica|streamlit"
+echo ""
+
+# Step 10: Quick connectivity test
+log "Step 10: Testing UE connectivity..."
 if docker exec oai-ue-slice1 ping -I oaitun_ue1 -c 2 8.8.8.8 &>/dev/null; then
     log_success "UE has internet connectivity!"
 else
@@ -177,10 +191,18 @@ echo "========================================"
 log_success "Lab startup completed!"
 echo "========================================"
 echo ""
-echo "Next steps:"
+echo "5G Network Access:"
 echo "  - View FlexRIC logs: docker logs -f flexric"
 echo "  - View gNodeB logs: docker logs -f oai-gnb"
 echo "  - View UE logs: docker logs -f oai-ue-slice1"
+echo ""
+echo "Monitoring & Visualization:"
+echo "  - Streamlit UI: http://localhost:8501"
+echo "  - Grafana: http://localhost:9002 (admin/admin)"
+echo "  - InfluxDB: http://localhost:9001"
+echo "  - Kinetica Workbench: http://localhost:8000 (admin/Admin123!)"
+echo ""
+echo "Management:"
 echo "  - Stop the lab: ./lab_stop.sh"
 echo "  - Check status: ./lab_status.sh"
 echo ""

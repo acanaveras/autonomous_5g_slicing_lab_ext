@@ -46,51 +46,57 @@ log "Starting lab shutdown..."
 log "Log file: $LOG_FILE"
 echo ""
 
-# Step 1: Stop UE
-log "Step 1: Stopping UE containers..."
+# Step 1: Stop Monitoring Stack
+log "Step 1: Stopping Monitoring Stack..."
+docker-compose -f docker-compose-monitoring.yaml down >> "$LOG_FILE" 2>&1 || true
+log_success "Monitoring Stack stopped"
+echo ""
+
+# Step 2: Stop UE
+log "Step 2: Stopping UE containers..."
 docker-compose -f docker-compose-ue-host.yaml down >> "$LOG_FILE" 2>&1 || true
 log_success "UE containers stopped"
 echo ""
 
-# Step 2: Stop gNodeB and FlexRIC
-log "Step 2: Stopping gNodeB and FlexRIC..."
+# Step 3: Stop gNodeB and FlexRIC
+log "Step 3: Stopping gNodeB and FlexRIC..."
 docker-compose -f docker-compose-gnb.yaml down >> "$LOG_FILE" 2>&1 || true
 log_success "gNodeB and FlexRIC stopped"
 echo ""
 
-# Step 3: Stop 5G Core Network (Slice 2)
-log "Step 3: Stopping 5G Core Network (Slice 2)..."
+# Step 4: Stop 5G Core Network (Slice 2)
+log "Step 4: Stopping 5G Core Network (Slice 2)..."
 cd ..
 docker-compose -f docker-compose-oai-cn-slice2.yaml down >> "$LOG_FILE" 2>&1 || true
 log_success "5G Core Network (Slice 2) stopped"
 echo ""
 
-# Step 4: Stop 5G Core Network (Slice 1)
-log "Step 4: Stopping 5G Core Network (Slice 1)..."
+# Step 5: Stop 5G Core Network (Slice 1)
+log "Step 5: Stopping 5G Core Network (Slice 1)..."
 docker-compose -f docker-compose-oai-cn-slice1.yaml down >> "$LOG_FILE" 2>&1 || true
 log_success "5G Core Network (Slice 1) stopped"
 echo ""
 
-# Step 5: Check for remaining containers
-log "Step 5: Checking for remaining containers..."
-remaining=$(docker ps -q --filter "name=oai-" --filter "name=flexric" | wc -l)
+# Step 6: Check for remaining containers
+log "Step 6: Checking for remaining containers..."
+remaining=$(docker ps -q --filter "name=oai-" --filter "name=flexric" --filter "name=influx" --filter "name=grafana" --filter "name=kinetica" --filter "name=streamlit" | wc -l)
 if [ "$remaining" -gt 0 ]; then
     log "Found $remaining remaining containers, stopping them..."
-    docker ps --filter "name=oai-" --filter "name=flexric" --format "{{.Names}}" | xargs -r docker stop >> "$LOG_FILE" 2>&1 || true
-    docker ps -a --filter "name=oai-" --filter "name=flexric" --format "{{.Names}}" | xargs -r docker rm >> "$LOG_FILE" 2>&1 || true
+    docker ps --filter "name=oai-" --filter "name=flexric" --filter "name=influx" --filter "name=grafana" --filter "name=kinetica" --filter "name=streamlit" --format "{{.Names}}" | xargs -r docker stop >> "$LOG_FILE" 2>&1 || true
+    docker ps -a --filter "name=oai-" --filter "name=flexric" --filter "name=influx" --filter "name=grafana" --filter "name=kinetica" --filter "name=streamlit" --format "{{.Names}}" | xargs -r docker rm >> "$LOG_FILE" 2>&1 || true
 fi
 log_success "All containers stopped and removed"
 echo ""
 
-# Step 6: Display final status
-log "Step 6: Final Status"
+# Step 7: Display final status
+log "Step 7: Final Status"
 echo ""
-running_containers=$(docker ps --filter "name=oai-" --filter "name=flexric" --format "{{.Names}}" | wc -l)
+running_containers=$(docker ps --filter "name=oai-" --filter "name=flexric" --filter "name=influx" --filter "name=grafana" --filter "name=kinetica" --filter "name=streamlit" --format "{{.Names}}" | wc -l)
 if [ "$running_containers" -eq 0 ]; then
     log_success "No lab containers are running"
 else
     log_error "Warning: Some containers are still running:"
-    docker ps --filter "name=oai-" --filter "name=flexric"
+    docker ps --filter "name=oai-" --filter "name=flexric" --filter "name=influx" --filter "name=grafana" --filter "name=kinetica" --filter "name=streamlit"
 fi
 echo ""
 

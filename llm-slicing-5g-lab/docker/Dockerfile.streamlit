@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: Copyright (c) 2023-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+FROM python:3.10-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements first for better caching
+COPY agentic-llm/requirements_grafana.txt /app/requirements.txt
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application files
+COPY agentic-llm/chatbot_DLI.py /app/
+COPY agentic-llm/influxdb_utils.py /app/
+COPY agentic-llm/agents.py /app/
+COPY agentic-llm/tools.py /app/
+COPY agentic-llm/config.yaml /app/
+COPY agentic-llm/.env /app/
+
+# Create necessary directories
+RUN mkdir -p /app/logs
+
+# Expose Streamlit port
+EXPOSE 8501
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl --fail http://localhost:8501/_stcore/health || exit 1
+
+# Run Streamlit app
+CMD ["streamlit", "run", "chatbot_DLI.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
