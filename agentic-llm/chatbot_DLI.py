@@ -115,8 +115,13 @@ def generate_sql_query(ue: str, table_name: str = None):
                 "timestamp" DESC
             """
     
-# Initialize InfluxDB client
-influx_client = InfluxDBMetricsClient()
+# Initialize InfluxDB client with environment variables
+influx_client = InfluxDBMetricsClient(
+    url=os.getenv("INFLUXDB_URL", "http://localhost:9001"),
+    token=os.getenv("INFLUXDB_TOKEN", "5g-lab-token"),
+    org=os.getenv("INFLUXDB_ORG", "5g-lab"),
+    bucket=os.getenv("INFLUXDB_BUCKET", "5g-metrics")
+)
 influx_client.connect()
 
 # Initialize session state for persistent data storage
@@ -149,9 +154,25 @@ def tail_logs():
             yield lines  
 
 def start():
-    #Start Agent 
-    process = subprocess.Popen(['python3', 'langgraph_agent.py'])
-    
+    #Start Agent - AI agent now fully enabled with LangChain/LangGraph
+    global process
+    try:
+        # Load environment variables for NVIDIA API key
+        load_dotenv()
+
+        logger.info("Starting LangGraph AI Agent...")
+        process = subprocess.Popen(
+            ['python3', 'langgraph_agent.py'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            bufsize=1
+        )
+        logger.info(f"Started langgraph_agent.py with PID: {process.pid}")
+    except Exception as e:
+        logger.error(f"Failed to start AI agent: {e}")
+        logger.info("Falling back to reading traffic generator logs")
+
     # Read stdout and stderr line by line
     # for line in process.stdout:
     #     logger.info(line.strip())  # Log stdout
@@ -269,40 +290,23 @@ if start_monitoring:
                 logger.error(f"Error fetching UE1 data from Kinetica: {error}")
 
             try:
-                new_data_ue2 = kdbc.to_df(sql=generate_sql_query(ue="UE3"))  # Use UE3 as in the original
-                new_data_ue2["timestamp"] = pd.to_datetime(new_data_ue2["timestamp"]).dt.tz_localize("UTC")
-
-                if not new_data_ue2.empty:
-                    st.session_state.data_ue2 = (
-                        pd.concat([st.session_state.data_ue2, new_data_ue2])
-                        .drop_duplicates(subset=["timestamp"])
-                        .sort_values("timestamp")
-                        .query("timestamp > @cutoff_time")
-                        .reset_index(drop=True)
-                    )
+                # UE3 is simulated in InfluxDB only, not in Kinetica
+                # Skip Kinetica query for UE3 to avoid errors
+                pass
             except Exception as error:
                 logger.error(f"Error fetching UE2 data from Kinetica: {error}")
 
         # Write new data to InfluxDB for real-time visualization
-        if not st.session_state.data_ue1.empty:
-            # Write latest UE1 data to InfluxDB
-            latest_ue1 = st.session_state.data_ue1.iloc[-1]
-            influx_client.write_metrics(
-                ue="UE1",
-                loss_percentage=latest_ue1["loss_percentage"],
-                bitrate=latest_ue1["bitrate"],
-                timestamp=latest_ue1["timestamp"]
-            )
-            
-        if not st.session_state.data_ue2.empty:
-            # Write latest UE2 data to InfluxDB
-            latest_ue2 = st.session_state.data_ue2.iloc[-1]
-            influx_client.write_metrics(
-                ue="UE3",  # match Kinetica/original logic
-                loss_percentage=latest_ue2["loss_percentage"],
-                bitrate=latest_ue2["bitrate"],
-                timestamp=latest_ue2["timestamp"]
-            )
+        # DISABLED: Traffic generator already writes to InfluxDB directly
+        # Streamlit only reads from Kinetica and displays logs
+        # if not st.session_state.data_ue1.empty:
+        #     latest_ue1 = st.session_state.data_ue1.iloc[-1]
+        #     influx_client.write_metrics(
+        #         ue="UE1",
+        #         loss_percentage=latest_ue1["loss_percentage"],
+        #         bitrate=latest_ue1["bitrate"],
+        #         timestamp=latest_ue1["timestamp"]
+        #     )
 
 if stop_monitoring:
     status_placeholder.text("Monitoring Stopped")

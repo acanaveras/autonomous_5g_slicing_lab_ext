@@ -143,7 +143,7 @@ logger.info("🚀 CONTINUOUS REAL-TIME TRAFFIC GENERATION")
 logger.info("="*60)
 
 t1 = threading.Thread(target=iperf_runner_continuous, args=(
-    "oai-ue-slice1", "UE1", "12.1.1.3", "192.168.70.135", 5201, "30M", 60,
+    "oai-ue-slice1", "UE1", "12.1.1.4", "192.168.70.135", 5201, "30M", 60,
     "/home/ubuntu/autonomous_5g_slicing_lab_ext/llm-slicing-5g-lab/logs/UE1_iperfc.log"
 ), daemon=False)
 
