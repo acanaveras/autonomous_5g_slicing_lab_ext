@@ -68,24 +68,34 @@ WINDOW_SIZE_SECONDS = 60
 process = None
 logs = []
 
-# Configure for local Kinetica instance
-os.environ["KINETICA_HOST"] = "localhost:9191"
-os.environ["KINETICA_USERNAME"] = "admin"
-os.environ["KINETICA_PASSWORD"] = "Admin123!"
-os.environ["KINETICA_SCHEMA"] = "nvidia_gtc_dli_2025"
+# Configure for Kinetica instance (use env vars if set, otherwise defaults)
+if "KINETICA_HOST" not in os.environ:
+    os.environ["KINETICA_HOST"] = "localhost:9191"
+if "KINETICA_USERNAME" not in os.environ:
+    os.environ["KINETICA_USERNAME"] = "admin"
+if "KINETICA_PASSWORD" not in os.environ:
+    os.environ["KINETICA_PASSWORD"] = "Admin123!"
+if "KINETICA_SCHEMA" not in os.environ:
+    os.environ["KINETICA_SCHEMA"] = "nvidia_gtc_dli_2025"
 
 # Fixed table name - no more environment variable issues!
 FIXED_TABLE_NAME = "nvidia_gtc_dli_2025.iperf3_logs"
 
-
-kdbc_options = GPUdb.Options()
-kdbc_options.username = os.environ.get("KINETICA_USERNAME")
-kdbc_options.password = os.environ.get("KINETICA_PASSWORD")
-kdbc_options.disable_auto_discovery = True
-kdbc: GPUdb = GPUdb(
-    host=os.environ.get("KINETICA_HOST"),
-    options=kdbc_options
-)
+# Connect to Kinetica (optional - will continue without it)
+kdbc = None
+try:
+    kdbc_options = GPUdb.Options()
+    kdbc_options.username = os.environ.get("KINETICA_USERNAME")
+    kdbc_options.password = os.environ.get("KINETICA_PASSWORD")
+    kdbc_options.disable_auto_discovery = True
+    kdbc: GPUdb = GPUdb(
+        host=os.environ.get("KINETICA_HOST"),
+        options=kdbc_options
+    )
+    logger.info("✅ Connected to Kinetica")
+except Exception as e:
+    logger.warning(f"⚠️  Kinetica not available: {e}")
+    logger.info("Continuing with InfluxDB only - Kinetica features will be disabled")
 
 def generate_sql_query(ue: str, table_name: str = None):
     # Use fixed table name if no specific table name provided
@@ -241,35 +251,37 @@ if start_monitoring:
         # Fetch new data for UE1 and UE2 (restored to NVIDIA original)
         cutoff_time = get_cutoff_time()
 
-        try:
-            new_data_ue1 = kdbc.to_df(sql=generate_sql_query(ue="UE1"))
-            new_data_ue1["timestamp"] = pd.to_datetime(new_data_ue1["timestamp"]).dt.tz_localize("UTC")
+        # Only fetch from Kinetica if it's available
+        if kdbc is not None:
+            try:
+                new_data_ue1 = kdbc.to_df(sql=generate_sql_query(ue="UE1"))
+                new_data_ue1["timestamp"] = pd.to_datetime(new_data_ue1["timestamp"]).dt.tz_localize("UTC")
 
-            if not new_data_ue1.empty:
-                st.session_state.data_ue1 = (
-                    pd.concat([st.session_state.data_ue1, new_data_ue1])
-                    .drop_duplicates(subset=["timestamp"])
-                    .sort_values("timestamp")
-                    .query("timestamp > @cutoff_time")
-                    .reset_index(drop=True)
-                )
-        except Exception as error:
-            logger.error(f"Error fetching UE1 data: {error}")
+                if not new_data_ue1.empty:
+                    st.session_state.data_ue1 = (
+                        pd.concat([st.session_state.data_ue1, new_data_ue1])
+                        .drop_duplicates(subset=["timestamp"])
+                        .sort_values("timestamp")
+                        .query("timestamp > @cutoff_time")
+                        .reset_index(drop=True)
+                    )
+            except Exception as error:
+                logger.error(f"Error fetching UE1 data from Kinetica: {error}")
 
-        try:
-            new_data_ue2 = kdbc.to_df(sql=generate_sql_query(ue="UE3"))  # Use UE3 as in the original
-            new_data_ue2["timestamp"] = pd.to_datetime(new_data_ue2["timestamp"]).dt.tz_localize("UTC")
+            try:
+                new_data_ue2 = kdbc.to_df(sql=generate_sql_query(ue="UE3"))  # Use UE3 as in the original
+                new_data_ue2["timestamp"] = pd.to_datetime(new_data_ue2["timestamp"]).dt.tz_localize("UTC")
 
-            if not new_data_ue2.empty:
-                st.session_state.data_ue2 = (
-                    pd.concat([st.session_state.data_ue2, new_data_ue2])
-                    .drop_duplicates(subset=["timestamp"])
-                    .sort_values("timestamp")
-                    .query("timestamp > @cutoff_time")
-                    .reset_index(drop=True)
-                )
-        except Exception as error:
-            logger.error(f"Error fetching UE2 data: {error}")
+                if not new_data_ue2.empty:
+                    st.session_state.data_ue2 = (
+                        pd.concat([st.session_state.data_ue2, new_data_ue2])
+                        .drop_duplicates(subset=["timestamp"])
+                        .sort_values("timestamp")
+                        .query("timestamp > @cutoff_time")
+                        .reset_index(drop=True)
+                    )
+            except Exception as error:
+                logger.error(f"Error fetching UE2 data from Kinetica: {error}")
 
         # Write new data to InfluxDB for real-time visualization
         if not st.session_state.data_ue1.empty:

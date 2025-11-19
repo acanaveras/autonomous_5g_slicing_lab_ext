@@ -1,4 +1,4 @@
-AGENT_LOG_FILE: ../llm-slicing-5g-lab/logs/agent.log
+AGENT_LOG_FILE: ../llm-slicing-5g-lab/logs/traffic_gen_new.log
 API_KEY: <enter API Key>
 LOG_FILE_UE1: ../llm-slicing-5g-lab/logs/UE1_iperfc.log
 LOG_FILE_UE2: ../llm-slicing-5g-lab/logs/UE2_iperfc.log

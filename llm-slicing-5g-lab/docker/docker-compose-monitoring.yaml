@@ -85,12 +85,14 @@ services:
       - KINETICA_ADMIN_PASSWORD=Admin123!
     volumes:
       - ../kinetica-data:/opt/gpudb/persist
+      - ./kinetica-start.sh:/kinetica-start.sh
+    command: ["/bin/bash", "/kinetica-start.sh"]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9191/show/system/properties"]
+      test: ["CMD-SHELL", "/opt/gpudb/core/bin/gpudb status | grep -q 'GPUdb.*Running' || exit 1"]
       interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 120s
+      retries: 10
+      start_period: 180s
     restart: unless-stopped
     shm_size: 2gb
     logging:

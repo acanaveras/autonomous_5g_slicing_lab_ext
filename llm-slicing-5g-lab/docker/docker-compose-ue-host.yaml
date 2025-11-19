@@ -76,6 +76,7 @@ services:
       echo 'IMSI: 001010000000002';
       echo 'DNN: oai2 (Slice 2)';
       echo 'Connecting to gNodeB at 192.168.70.151:4043';
+      echo 'Node number: 4 (creates oaitun_ue3)';
       sleep 5;
       /opt/oai-ue/bin/nr-uesoftmodem
       -O /opt/oai-ue/etc/ue.conf
@@ -87,6 +88,7 @@ services:
       -C 3619200000
       -r 106
       -E
+      --node-number 4
       --log_config.global_log_level info
       2>&1 | tee /opt/oai-ue/logs/UE_slice2_host.log
       "
