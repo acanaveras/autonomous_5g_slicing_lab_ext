@@ -1,4 +1,3 @@
-version: '2.3'
 services:
     oai-smf-slice2:
         container_name: "oai-smf-slice2"
