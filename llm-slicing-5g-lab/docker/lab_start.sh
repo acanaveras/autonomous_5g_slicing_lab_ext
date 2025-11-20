@@ -85,7 +85,8 @@ echo ""
 # Step 0: Build RIC and OAI Network Elements (if not already built)
 log "Step 0: Building RIC and OAI Network Elements..."
 cd ..
-if [ -d "openairinterface5g" ] && [ -d "flexric" ]; then
+# Check if binaries actually exist, not just directories
+if [ -f "flexric/build/examples/ric/nearRT-RIC" ] && [ -f "openairinterface5g/cmake_targets/ran_build/build/nr-softmodem" ]; then
     log_success "RIC and OAI already built, skipping..."
 else
     log "Building RIC and OAI Network Elements (this may take some time)..."
