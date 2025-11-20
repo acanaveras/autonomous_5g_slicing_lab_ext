@@ -16,17 +16,22 @@
 # limitations under the License.
 
 
-set -e  # Exit immediately if any command fails
+# Note: Not using set -e to allow better error handling and recovery
 
 # Save the initial directory
 INITIAL_DIR=$(pwd)
 
 # Step 0: Install necessary compilers (gcc-12, g++-12)
-echo ">>> Updating apt and installing gcc-12, g++-12..."
-sudo apt update
-sudo apt install -y gcc-12 g++-12
-sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100
-sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
+echo ">>> Checking compilers..."
+if ! gcc-12 --version &>/dev/null || ! g++-12 --version &>/dev/null; then
+    echo ">>> Installing gcc-12, g++-12..."
+    sudo apt update
+    sudo apt install -y gcc-12 g++-12
+    sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100
+    sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
+else
+    echo ">>> Compilers already installed"
+fi
 
 # Step 1: Clone and build openairinterface5g
 echo ">>> Cloning and building openairinterface5g..."
@@ -55,8 +60,25 @@ fi
 cd cmake_targets || { echo "Failed to enter cmake_targets"; exit 1; }
 
 # Build openairinterface5g
-echo ">>> Installing OAI dependencies (this may take a few minutes)..."
-./build_oai -I || { echo "Failed to install OAI dependencies"; exit 1; }
+# Check if key dependencies are already installed
+if [ ! -f "/opt/asn1c/bin/asn1c" ]; then
+    echo ">>> Installing OAI dependencies (this may take a few minutes)..."
+    # Run dependency installation - ignore exit code as the script has an aggressive exit trap
+    ./build_oai -I || true
+
+    # Verify critical dependencies are installed
+    echo ">>> Verifying critical dependencies..."
+    if [ ! -f "/opt/asn1c/bin/asn1c" ]; then
+        echo "ERROR: ASN1C not installed. Check logs in openairinterface5g/cmake_targets/log/"
+        exit 1
+    fi
+    if [ ! -d "/usr/include/simde" ]; then
+        echo "WARNING: SIMDE headers not found, but continuing..."
+    fi
+    echo ">>> Dependencies verified successfully"
+else
+    echo ">>> OAI dependencies already installed, skipping..."
+fi
 
 echo ">>> Building OAI gNB and nrUE (this will take 30-45 minutes)..."
 ./build_oai -c -C -w SIMU --gNB --nrUE --build-e2 --ninja || { echo "Failed to build OAI"; exit 1; }
