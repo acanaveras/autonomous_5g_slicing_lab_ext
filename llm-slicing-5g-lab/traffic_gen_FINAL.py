@@ -47,7 +47,10 @@ def get_ue_ip(container_name: str = "oai-ue-slice1") -> str:
 
 # Configure Kinetica (optional - will continue without it)
 try:
-    from gpudb import GPUdb
+    from gpudb import GPUdb, GPUdbTable
+    from gpudb import GPUdbColumnProperty as cp
+    from gpudb import GPUdbRecordColumn as rc
+
     kdbc_options = GPUdb.Options()
     kdbc_options.username = "admin"
     kdbc_options.password = "Admin123!"
@@ -55,9 +58,53 @@ try:
     kdbc = GPUdb(host="localhost:9191", options=kdbc_options)
     FIXED_TABLE_NAME = "nvidia_gtc_dli_2025.iperf3_logs"
     logger.info("✅ Connected to Kinetica")
+
+    # Create schema if it doesn't exist
+    target_schema = "nvidia_gtc_dli_2025"
+    try:
+        existing_schemas = kdbc.show_schema(schema_name=target_schema)
+        if not existing_schemas['schema_names']:
+            kdbc.create_schema(schema_name=target_schema)
+            logger.info(f"✅ Created schema: {target_schema}")
+        else:
+            logger.info(f"✅ Schema exists: {target_schema}")
+    except Exception as e:
+        # Try to create anyway
+        try:
+            kdbc.create_schema(schema_name=target_schema)
+            logger.info(f"✅ Created schema: {target_schema}")
+        except:
+            logger.info(f"✅ Schema already exists: {target_schema}")
+
+    # Create table if it doesn't exist
+    if not kdbc.has_table(table_name=FIXED_TABLE_NAME)['table_exists']:
+        logger.info(f"Creating Kinetica table: {FIXED_TABLE_NAME}")
+        schema = [
+            ["id",               rc._ColumnType.STRING, cp.UUID,     cp.PRIMARY_KEY, cp.INIT_WITH_UUID],
+            ["ue",               rc._ColumnType.STRING, cp.CHAR8,    cp.DICT],
+            ["timestamp",        rc._ColumnType.STRING, cp.DATETIME, cp.INIT_WITH_NOW],
+            ["stream",           rc._ColumnType.INT,    cp.INT8,     cp.DICT],
+            ["interval_start",   rc._ColumnType.FLOAT],
+            ["interval_end",     rc._ColumnType.FLOAT],
+            ["duration",         rc._ColumnType.FLOAT],
+            ["data_transferred", rc._ColumnType.FLOAT],
+            ["bitrate",          rc._ColumnType.FLOAT],
+            ["jitter",           rc._ColumnType.FLOAT],
+            ["lost_packets",     rc._ColumnType.INT],
+            ["total_packets",    rc._ColumnType.INT],
+            ["loss_percentage",  rc._ColumnType.FLOAT]
+        ]
+        kdbc_table = GPUdbTable(_type=schema, name=FIXED_TABLE_NAME, db=kdbc)
+        logger.info(f"✅ Created Kinetica table: {FIXED_TABLE_NAME}")
+    else:
+        # Table exists, just get reference to it
+        kdbc_table = GPUdbTable(name=FIXED_TABLE_NAME, db=kdbc)
+        logger.info(f"✅ Using existing Kinetica table: {FIXED_TABLE_NAME}")
+
 except Exception as e:
     logger.warning(f"⚠️  Kinetica not available: {e}")
     kdbc = None
+    kdbc_table = None
     FIXED_TABLE_NAME = None
 
 # Initialize InfluxDB
