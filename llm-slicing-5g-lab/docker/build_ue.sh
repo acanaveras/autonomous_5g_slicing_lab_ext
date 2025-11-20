@@ -38,7 +38,8 @@ echo "   This will take approximately 2-3 minutes"
 echo "   (Reusing binaries from gNodeB build)"
 echo ""
 
-cd /home/ubuntu/autonomous_5g_slicing_lab_ext/llm-slicing-5g-lab
+# Go to the parent directory (llm-slicing-5g-lab)
+cd "$SCRIPT_DIR/.."
 docker build -f docker/Dockerfile.ue -t oai-ue-5g-slicing:latest . $NO_CACHE
 
 if [ $? -eq 0 ]; then
