@@ -1,6 +1,10 @@
 #!/bin/bash
 # Start Kinetica with automatic GPUdb startup
 
+# Fix permissions on persist directory to avoid permission issues
+chown -R root:root /opt/gpudb/persist 2>/dev/null || true
+chmod -R u+w /opt/gpudb/persist 2>/dev/null || true
+
 # Start the host manager and supporting services
 ldconfig
 /opt/gpudb-docker-start.sh &
