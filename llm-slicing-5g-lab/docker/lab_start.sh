@@ -89,10 +89,15 @@ cd ..
 if [ -f "flexric/build/examples/ric/nearRT-RIC" ] && [ -f "openairinterface5g/cmake_targets/ran_build/build/nr-softmodem" ]; then
     log_success "RIC and OAI already built, skipping..."
 else
-    log "Building RIC and OAI Network Elements (this may take some time)..."
+    log "Building RIC and OAI Network Elements (this may take 30-60 minutes)..."
     chmod +x build_ric_oai_ne.sh
-    ./build_ric_oai_ne.sh >> "$LOG_FILE" 2>&1
-    log_success "RIC and OAI Network Elements built successfully"
+    ./build_ric_oai_ne.sh 2>&1 | tee -a "$LOG_FILE"
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
+        log_success "RIC and OAI Network Elements built successfully"
+    else
+        log_error "RIC and OAI Network Elements build failed"
+        exit 1
+    fi
 fi
 cd docker
 echo ""
@@ -104,8 +109,8 @@ if docker images | grep -q "flexric-5g-slicing"; then
 else
     log "Building FlexRIC image (this may take 10-15 minutes)..."
     chmod +x build_flexric.sh
-    ./build_flexric.sh >> "$LOG_FILE" 2>&1
-    if [ $? -eq 0 ]; then
+    ./build_flexric.sh 2>&1 | tee -a "$LOG_FILE"
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
         log_success "FlexRIC image built successfully"
     else
         log_error "FlexRIC image build failed, check logs"
@@ -121,8 +126,8 @@ if docker images | grep -q "oai-gnb-5g-slicing"; then
 else
     log "Building gNodeB image (this may take 15-20 minutes)..."
     chmod +x build_gnb.sh
-    ./build_gnb.sh >> "$LOG_FILE" 2>&1
-    if [ $? -eq 0 ]; then
+    ./build_gnb.sh 2>&1 | tee -a "$LOG_FILE"
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
         log_success "gNodeB image built successfully"
     else
         log_error "gNodeB image build failed, check logs"
@@ -138,8 +143,8 @@ if docker images | grep -q "oai-ue-5g-slicing"; then
 else
     log "Building UE image (this may take 2-3 minutes)..."
     chmod +x build_ue.sh
-    ./build_ue.sh >> "$LOG_FILE" 2>&1
-    if [ $? -eq 0 ]; then
+    ./build_ue.sh 2>&1 | tee -a "$LOG_FILE"
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
         log_success "UE image built successfully"
     else
         log_error "UE image build failed, check logs"
@@ -155,8 +160,8 @@ if docker images | grep -q "streamlit-5g-ui"; then
 else
     log "Building Streamlit image (this may take 2-3 minutes)..."
     chmod +x build_streamlit.sh
-    ./build_streamlit.sh >> "$LOG_FILE" 2>&1
-    if [ $? -eq 0 ]; then
+    ./build_streamlit.sh 2>&1 | tee -a "$LOG_FILE"
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
         log_success "Streamlit image built successfully"
     else
         log_warning "Streamlit image build failed, continuing without it..."
