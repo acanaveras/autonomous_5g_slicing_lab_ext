@@ -55,8 +55,11 @@ fi
 cd cmake_targets || { echo "Failed to enter cmake_targets"; exit 1; }
 
 # Build openairinterface5g
-./build_oai -I
-./build_oai -c -C -w SIMU --gNB --nrUE --build-e2 --ninja
+echo ">>> Installing OAI dependencies (this may take a few minutes)..."
+./build_oai -I || { echo "Failed to install OAI dependencies"; exit 1; }
+
+echo ">>> Building OAI gNB and nrUE (this will take 30-45 minutes)..."
+./build_oai -c -C -w SIMU --gNB --nrUE --build-e2 --ninja || { echo "Failed to build OAI"; exit 1; }
 
 # Step 2: Go back to the initial directory
 cd "$INITIAL_DIR" || { echo "Failed to return to initial directory"; exit 1; }
@@ -87,13 +90,15 @@ else
 fi
 
 # Step 4: Copy necessary files
+echo ">>> Copying xApp control files..."
 cp "$INITIAL_DIR/xapp_rc_slice_dynamic.c" examples/xApp/c/ctrl/ || { echo "Failed to copy xapp_rc_slice_dynamic.c"; exit 1; }
 cp "$INITIAL_DIR/CMakeLists.txt" examples/xApp/c/ctrl/ || { echo "Failed to copy CMakeLists.txt"; exit 1; }
 
 # Step 5: Build flexric
-mkdir -p build && cd build
-cmake -DXAPP_MULTILANGUAGE=OFF ..
-make -j8
-sudo make install
+echo ">>> Building FlexRIC (this will take 5-10 minutes)..."
+mkdir -p build && cd build || { echo "Failed to create/enter build directory"; exit 1; }
+cmake -DXAPP_MULTILANGUAGE=OFF .. || { echo "FlexRIC cmake configuration failed"; exit 1; }
+make -j8 || { echo "FlexRIC compilation failed"; exit 1; }
+sudo make install || { echo "FlexRIC installation failed"; exit 1; }
 
 echo ">>> All steps completed successfully!"
