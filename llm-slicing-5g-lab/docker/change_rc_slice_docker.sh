@@ -39,7 +39,7 @@ echo "================================================"
 # Check if container is running
 if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
     echo "Error: FlexRIC container '${CONTAINER_NAME}' is not running"
-    echo "Please start the container first with: docker-compose -f docker/docker-compose-flexric.yaml up -d"
+    echo "Please start the container first with: docker compose -f docker/docker-compose-flexric.yaml up -d"
     exit 1
 fi
 

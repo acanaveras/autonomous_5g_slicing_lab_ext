@@ -187,7 +187,7 @@ echo ""
 # Step 2: Start 5G Core Network (Slice 1)
 log "Step 2: Starting 5G Core Network (Slice 1)..."
 cd ..
-docker-compose -f docker-compose-oai-cn-slice1.yaml up -d >> "$LOG_FILE" 2>&1
+docker compose -f docker-compose-oai-cn-slice1.yaml up -d >> "$LOG_FILE" 2>&1
 wait_for_healthy "oai-amf"
 wait_for_healthy "oai-smf-slice1"
 wait_for_healthy "oai-upf-slice1"
@@ -196,7 +196,7 @@ echo ""
 
 # Step 3: Start 5G Core Network (Slice 2)
 log "Step 3: Starting 5G Core Network (Slice 2)..."
-docker-compose -f docker-compose-oai-cn-slice2.yaml up -d >> "$LOG_FILE" 2>&1
+docker compose -f docker-compose-oai-cn-slice2.yaml up -d >> "$LOG_FILE" 2>&1
 wait_for_healthy "oai-smf-slice2"
 wait_for_healthy "oai-upf-slice2"
 log_success "5G Core Network (Slice 2) is running"
@@ -205,7 +205,7 @@ echo ""
 # Step 4: Start FlexRIC and gNodeB
 log "Step 4: Starting FlexRIC and gNodeB..."
 cd docker
-docker-compose -f docker-compose-gnb.yaml up -d >> "$LOG_FILE" 2>&1
+docker compose -f docker-compose-gnb.yaml up -d >> "$LOG_FILE" 2>&1
 wait_for_healthy "flexric" 60
 wait_for_healthy "oai-gnb" 60
 log_success "FlexRIC and gNodeB are running"
@@ -223,7 +223,7 @@ echo ""
 
 # Step 6: Start UE (Slice 1 only for now due to TUN interface limitation)
 log "Step 6: Starting UE (Slice 1)..."
-docker-compose -f docker-compose-ue-host.yaml up -d oai-ue-slice1 >> "$LOG_FILE" 2>&1
+docker compose -f docker-compose-ue-host.yaml up -d oai-ue-slice1 >> "$LOG_FILE" 2>&1
 wait_for_healthy "oai-ue-slice1" 60
 log_success "UE (Slice 1) is running"
 echo ""
@@ -246,7 +246,7 @@ echo ""
 
 # Step 8: Start Monitoring Stack (Optional)
 log "Step 8: Starting Monitoring Stack (InfluxDB, Grafana, Kinetica, Streamlit)..."
-if docker-compose -f docker-compose-monitoring.yaml up -d >> "$LOG_FILE" 2>&1; then
+if docker compose -f docker-compose-monitoring.yaml up -d >> "$LOG_FILE" 2>&1; then
     log "Monitoring services starting..."
     wait_for_healthy "influxdb" 60
     wait_for_healthy "grafana" 60

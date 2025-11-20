@@ -50,7 +50,7 @@ echo "🏗️  Building FlexRIC image..."
 echo "   This will take approximately 10-15 minutes"
 echo ""
 
-docker-compose -f docker-compose-flexric.yaml build $NO_CACHE
+docker compose -f docker-compose-flexric.yaml build $NO_CACHE
 
 if [ $? -eq 0 ]; then
     echo ""
@@ -68,7 +68,7 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "  2. Start FlexRIC:"
     echo "     cd docker"
-    echo "     docker-compose -f docker-compose-flexric.yaml up -d"
+    echo "     docker compose -f docker-compose-flexric.yaml up -d"
     echo ""
     echo "  3. View logs:"
     echo "     docker logs -f flexric"

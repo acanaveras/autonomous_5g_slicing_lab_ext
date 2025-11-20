@@ -70,32 +70,32 @@ echo ""
 
 # Step 1: Stop Monitoring Stack
 log "Step 1: Stopping Monitoring Stack..."
-docker-compose -f docker-compose-monitoring.yaml down >> "$LOG_FILE" 2>&1 || true
+docker compose -f docker-compose-monitoring.yaml down >> "$LOG_FILE" 2>&1 || true
 log_success "Monitoring Stack stopped"
 echo ""
 
 # Step 2: Stop UE
 log "Step 2: Stopping UE containers..."
-docker-compose -f docker-compose-ue-host.yaml down >> "$LOG_FILE" 2>&1 || true
+docker compose -f docker-compose-ue-host.yaml down >> "$LOG_FILE" 2>&1 || true
 log_success "UE containers stopped"
 echo ""
 
 # Step 3: Stop gNodeB and FlexRIC
 log "Step 3: Stopping gNodeB and FlexRIC..."
-docker-compose -f docker-compose-gnb.yaml down >> "$LOG_FILE" 2>&1 || true
+docker compose -f docker-compose-gnb.yaml down >> "$LOG_FILE" 2>&1 || true
 log_success "gNodeB and FlexRIC stopped"
 echo ""
 
 # Step 4: Stop 5G Core Network (Slice 2)
 log "Step 4: Stopping 5G Core Network (Slice 2)..."
 cd ..
-docker-compose -f docker-compose-oai-cn-slice2.yaml down >> "$LOG_FILE" 2>&1 || true
+docker compose -f docker-compose-oai-cn-slice2.yaml down >> "$LOG_FILE" 2>&1 || true
 log_success "5G Core Network (Slice 2) stopped"
 echo ""
 
 # Step 5: Stop 5G Core Network (Slice 1)
 log "Step 5: Stopping 5G Core Network (Slice 1)..."
-docker-compose -f docker-compose-oai-cn-slice1.yaml down >> "$LOG_FILE" 2>&1 || true
+docker compose -f docker-compose-oai-cn-slice1.yaml down >> "$LOG_FILE" 2>&1 || true
 log_success "5G Core Network (Slice 1) stopped"
 echo ""
 

@@ -38,7 +38,7 @@ echo "   This will take approximately 15-20 minutes"
 echo "   (Compiling OpenAirInterface from source)"
 echo ""
 
-docker-compose -f docker-compose-gnb.yaml build $NO_CACHE oai-gnb
+docker compose -f docker-compose-gnb.yaml build $NO_CACHE oai-gnb
 
 if [ $? -eq 0 ]; then
     echo ""
@@ -50,16 +50,16 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "Next steps:"
     echo "  1. Ensure FlexRIC is running:"
-    echo "     docker-compose -f docker-compose-flexric.yaml up -d"
+    echo "     docker compose -f docker-compose-flexric.yaml up -d"
     echo ""
     echo "  2. Ensure 5G Core Network is running:"
     echo "     cd .."
-    echo "     docker-compose -f docker-compose-oai-cn-slice1.yaml up -d"
-    echo "     docker-compose -f docker-compose-oai-cn-slice2.yaml up -d"
+    echo "     docker compose -f docker-compose-oai-cn-slice1.yaml up -d"
+    echo "     docker compose -f docker-compose-oai-cn-slice2.yaml up -d"
     echo ""
     echo "  3. Start gNodeB:"
     echo "     cd docker"
-    echo "     docker-compose -f docker-compose-gnb.yaml up -d oai-gnb"
+    echo "     docker compose -f docker-compose-gnb.yaml up -d oai-gnb"
     echo ""
     echo "  4. View logs:"
     echo "     docker logs -f oai-gnb"
