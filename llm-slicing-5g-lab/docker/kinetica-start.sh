@@ -2,8 +2,15 @@
 # Start Kinetica with automatic GPUdb startup
 
 # Fix permissions on persist directory to avoid permission issues
+echo "Fixing permissions and creating directories..."
 chown -R root:root /opt/gpudb/persist 2>/dev/null || true
-chmod -R u+w /opt/gpudb/persist 2>/dev/null || true
+chmod -R 777 /opt/gpudb/persist 2>/dev/null || true
+
+# Create necessary directories that Kinetica needs
+mkdir -p /opt/gpudb/persist/tmp
+mkdir -p /opt/gpudb/persist/logs
+mkdir -p /opt/gpudb/persist/data
+chmod -R 777 /opt/gpudb/persist
 
 # Start the host manager and supporting services
 ldconfig
