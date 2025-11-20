@@ -27,6 +27,7 @@ if ! gcc-12 --version &>/dev/null || ! g++-12 --version &>/dev/null; then
     echo ">>> Installing gcc-12, g++-12..."
     sudo apt update
     sudo apt install -y gcc-12 g++-12
+    sudo apt install -y cmake ninja-build build-essential
     sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100
     sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
 else
