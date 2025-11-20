@@ -21,7 +21,7 @@
 # Save the initial directory
 INITIAL_DIR=$(pwd)
 
-# Step 0: Install necessary compilers (gcc-12, g++-12)
+# Step 0: Install necessary compilers and base dependencies
 echo ">>> Checking compilers..."
 if ! gcc-12 --version &>/dev/null || ! g++-12 --version &>/dev/null; then
     echo ">>> Installing gcc-12, g++-12..."
@@ -31,6 +31,54 @@ if ! gcc-12 --version &>/dev/null || ! g++-12 --version &>/dev/null; then
     sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
 else
     echo ">>> Compilers already installed"
+fi
+
+# Step 0.1: Install ASN1C manually (more reliable than OAI's build_oai -I)
+if [ ! -f "/opt/asn1c/bin/asn1c" ]; then
+    echo ">>> Installing ASN1C from source..."
+    sudo apt-get install -y bison flex
+
+    # Clean any previous attempts
+    sudo rm -rf /tmp/asn1c
+
+    # Clone and build
+    git clone https://github.com/mouse07410/asn1c /tmp/asn1c
+    cd /tmp/asn1c
+    git checkout vlm_master
+    git log -n1
+
+    autoreconf -iv
+    ./configure --prefix=/opt/asn1c/
+    make -j$(nproc)
+    sudo make install
+    sudo ldconfig
+
+    cd "$INITIAL_DIR"
+
+    # Verify installation
+    if [ -f "/opt/asn1c/bin/asn1c" ]; then
+        echo ">>> ASN1C installed successfully at /opt/asn1c/bin/asn1c"
+    else
+        echo "ERROR: ASN1C installation failed - binary not found"
+        exit 1
+    fi
+else
+    echo ">>> ASN1C already installed at /opt/asn1c/bin/asn1c"
+fi
+
+# Step 0.2: Install SIMDE headers
+if [ ! -d "/usr/include/simde" ]; then
+    echo ">>> Installing SIMDE headers..."
+    sudo rm -rf /tmp/simde
+    git clone https://github.com/simd-everywhere/simde-no-tests.git /tmp/simde
+    cd /tmp/simde
+    git checkout 389f360a66d4a3bec62b7d71ad8be877487809ba
+    git log -n1
+    sudo cp -rv /tmp/simde /usr/include/
+    cd "$INITIAL_DIR"
+    echo ">>> SIMDE headers installed"
+else
+    echo ">>> SIMDE headers already installed"
 fi
 
 # Step 1: Clone and build openairinterface5g
@@ -60,25 +108,9 @@ fi
 cd cmake_targets || { echo "Failed to enter cmake_targets"; exit 1; }
 
 # Build openairinterface5g
-# Check if key dependencies are already installed
-if [ ! -f "/opt/asn1c/bin/asn1c" ]; then
-    echo ">>> Installing OAI dependencies (this may take a few minutes)..."
-    # Run dependency installation - ignore exit code as the script has an aggressive exit trap
-    ./build_oai -I || true
-
-    # Verify critical dependencies are installed
-    echo ">>> Verifying critical dependencies..."
-    if [ ! -f "/opt/asn1c/bin/asn1c" ]; then
-        echo "ERROR: ASN1C not installed. Check logs in openairinterface5g/cmake_targets/log/"
-        exit 1
-    fi
-    if [ ! -d "/usr/include/simde" ]; then
-        echo "WARNING: SIMDE headers not found, but continuing..."
-    fi
-    echo ">>> Dependencies verified successfully"
-else
-    echo ">>> OAI dependencies already installed, skipping..."
-fi
+# Install remaining OAI dependencies (excluding ASN1C and SIMDE which we already installed)
+echo ">>> Installing remaining OAI dependencies..."
+./build_oai -I || echo "WARNING: Some OAI dependencies may have failed, but ASN1C/SIMDE are installed"
 
 echo ">>> Building OAI gNB and nrUE (this will take 30-45 minutes)..."
 ./build_oai -c -C -w SIMU --gNB --nrUE --build-e2 --ninja || { echo "Failed to build OAI"; exit 1; }
