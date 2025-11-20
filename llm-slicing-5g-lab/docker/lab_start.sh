@@ -321,7 +321,7 @@ echo "" >> "$AGENT_LOG"
 chmod 666 "$AGENT_LOG" 2>/dev/null || true
 
 # Start traffic generator in background
-if python3 traffic_gen_FINAL.py > "$TRAFFIC_LOG" 2>&1 &
+if python3.10 traffic_gen_FINAL.py > "$TRAFFIC_LOG" 2>&1 &
 then
     TRAFFIC_PID=$!
     sleep 3
