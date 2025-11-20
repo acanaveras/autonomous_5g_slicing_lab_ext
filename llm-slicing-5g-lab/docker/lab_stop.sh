@@ -46,6 +46,28 @@ log "Starting lab shutdown..."
 log "Log file: $LOG_FILE"
 echo ""
 
+# Step 0: Stop Traffic Generator and Log Streaming
+log "Step 0: Stopping traffic generator and log streaming..."
+TRAFFIC_PIDS=$(pgrep -f "traffic_gen_FINAL.py" || echo "")
+LOG_STREAM_PIDS=$(pgrep -f "tail -f.*traffic_gen_final.log" || echo "")
+
+if [ -n "$TRAFFIC_PIDS" ]; then
+    pkill -f "traffic_gen_FINAL.py" >> "$LOG_FILE" 2>&1 || true
+    log_success "Traffic generator stopped"
+else
+    log "No traffic generator running"
+fi
+
+if [ -n "$LOG_STREAM_PIDS" ]; then
+    pkill -f "tail -f.*traffic_gen_final.log" >> "$LOG_FILE" 2>&1 || true
+    log_success "Log streaming stopped"
+else
+    log "No log streaming running"
+fi
+
+sleep 1
+echo ""
+
 # Step 1: Stop Monitoring Stack
 log "Step 1: Stopping Monitoring Stack..."
 docker-compose -f docker-compose-monitoring.yaml down >> "$LOG_FILE" 2>&1 || true

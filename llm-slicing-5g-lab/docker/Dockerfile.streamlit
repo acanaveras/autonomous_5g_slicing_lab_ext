@@ -27,6 +27,7 @@ COPY agentic-llm/chatbot_DLI.py /app/
 COPY agentic-llm/influxdb_utils.py /app/
 COPY agentic-llm/agents.py /app/
 COPY agentic-llm/tools.py /app/
+COPY agentic-llm/langgraph_agent.py /app/
 COPY agentic-llm/config.yaml /app/
 COPY agentic-llm/.env /app/
 

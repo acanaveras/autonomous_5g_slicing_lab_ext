@@ -1,11 +1,49 @@
 #!/usr/bin/env python3
-# FINAL FIXED VERSION - Real-time streaming traffic generator
+# FINAL FIXED VERSION - Real-time streaming traffic generator with auto-detection
 import os, re, subprocess, threading, time, logging, random
 from datetime import datetime
 from typing import Pattern
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
+
+def get_ue_ip(container_name: str = "oai-ue-slice1") -> str:
+    """Auto-detect UE IP address from the container"""
+    try:
+        result = subprocess.run(
+            ["docker", "exec", container_name, "ip", "addr", "show", "oaitun_ue1"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            # Parse IP address from output like: "inet 12.1.1.3/24 brd ..."
+            for line in result.stdout.split('\n'):
+                if 'inet ' in line and '/24' in line:
+                    ip = line.strip().split()[1].split('/')[0]
+                    logger.info(f"✅ Auto-detected UE IP: {ip}")
+                    return ip
+    except Exception as e:
+        logger.error(f"Failed to auto-detect UE IP: {e}")
+
+    # Fallback to common IPs
+    logger.warning("Could not auto-detect UE IP, trying common addresses...")
+    for ip in ["12.1.1.2", "12.1.1.3", "12.1.1.4"]:
+        try:
+            # Test ping to see if interface responds
+            result = subprocess.run(
+                ["docker", "exec", container_name, "ping", "-I", ip, "-c", "1", "-W", "1", "192.168.70.135"],
+                capture_output=True,
+                timeout=3
+            )
+            if result.returncode == 0:
+                logger.info(f"✅ Found working UE IP: {ip}")
+                return ip
+        except:
+            continue
+
+    logger.error("❌ Could not determine UE IP address!")
+    return "12.1.1.2"  # Last resort fallback
 
 # Configure Kinetica (optional - will continue without it)
 try:
@@ -142,8 +180,12 @@ logger.info("="*60)
 logger.info("🚀 CONTINUOUS REAL-TIME TRAFFIC GENERATION")
 logger.info("="*60)
 
+# Auto-detect UE IP address
+ue_ip = get_ue_ip("oai-ue-slice1")
+logger.info(f"Using UE IP: {ue_ip}")
+
 t1 = threading.Thread(target=iperf_runner_continuous, args=(
-    "oai-ue-slice1", "UE1", "12.1.1.4", "192.168.70.135", 5201, "30M", 60,
+    "oai-ue-slice1", "UE1", ue_ip, "192.168.70.135", 5201, "30M", 60,
     "/home/ubuntu/autonomous_5g_slicing_lab_ext/llm-slicing-5g-lab/logs/UE1_iperfc.log"
 ), daemon=False)
 

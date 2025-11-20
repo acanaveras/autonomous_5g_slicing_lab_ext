@@ -82,6 +82,87 @@ log "Starting lab initialization..."
 log "Log file: $LOG_FILE"
 echo ""
 
+# Step 0: Build RIC and OAI Network Elements (if not already built)
+log "Step 0: Building RIC and OAI Network Elements..."
+cd ..
+if [ -d "openairinterface5g" ] && [ -d "flexric" ]; then
+    log_success "RIC and OAI already built, skipping..."
+else
+    log "Building RIC and OAI Network Elements (this may take some time)..."
+    chmod +x build_ric_oai_ne.sh
+    ./build_ric_oai_ne.sh >> "$LOG_FILE" 2>&1
+    log_success "RIC and OAI Network Elements built successfully"
+fi
+cd docker
+echo ""
+
+# Step 0.1: Build FlexRIC Docker Image
+log "Step 0.1: Building FlexRIC Docker Image..."
+if docker images | grep -q "flexric-5g-slicing"; then
+    log_success "FlexRIC image already exists, skipping build..."
+else
+    log "Building FlexRIC image (this may take 10-15 minutes)..."
+    chmod +x build_flexric.sh
+    ./build_flexric.sh >> "$LOG_FILE" 2>&1
+    if [ $? -eq 0 ]; then
+        log_success "FlexRIC image built successfully"
+    else
+        log_error "FlexRIC image build failed, check logs"
+        exit 1
+    fi
+fi
+echo ""
+
+# Step 0.2: Build gNodeB Docker Image
+log "Step 0.2: Building gNodeB Docker Image..."
+if docker images | grep -q "oai-gnb-5g-slicing"; then
+    log_success "gNodeB image already exists, skipping build..."
+else
+    log "Building gNodeB image (this may take 15-20 minutes)..."
+    chmod +x build_gnb.sh
+    ./build_gnb.sh >> "$LOG_FILE" 2>&1
+    if [ $? -eq 0 ]; then
+        log_success "gNodeB image built successfully"
+    else
+        log_error "gNodeB image build failed, check logs"
+        exit 1
+    fi
+fi
+echo ""
+
+# Step 0.3: Build UE Docker Image
+log "Step 0.3: Building UE Docker Image..."
+if docker images | grep -q "oai-ue-5g-slicing"; then
+    log_success "UE image already exists, skipping build..."
+else
+    log "Building UE image (this may take 2-3 minutes)..."
+    chmod +x build_ue.sh
+    ./build_ue.sh >> "$LOG_FILE" 2>&1
+    if [ $? -eq 0 ]; then
+        log_success "UE image built successfully"
+    else
+        log_error "UE image build failed, check logs"
+        exit 1
+    fi
+fi
+echo ""
+
+# Step 0.4: Build Streamlit Docker Image
+log "Step 0.4: Building Streamlit UI Docker Image..."
+if docker images | grep -q "streamlit-5g-ui"; then
+    log_success "Streamlit image already exists, skipping build..."
+else
+    log "Building Streamlit image (this may take 2-3 minutes)..."
+    chmod +x build_streamlit.sh
+    ./build_streamlit.sh >> "$LOG_FILE" 2>&1
+    if [ $? -eq 0 ]; then
+        log_success "Streamlit image built successfully"
+    else
+        log_warning "Streamlit image build failed, continuing without it..."
+    fi
+fi
+echo ""
+
 # Step 1: Check if Docker network exists
 log "Step 1: Checking Docker network..."
 if docker network inspect demo-oai-public-net &>/dev/null; then
@@ -171,6 +252,85 @@ else
 fi
 echo ""
 
+# Step 8.1: Start iperf3 servers on external DN
+log "Step 8.1: Starting iperf3 servers on external data network..."
+
+# Kill any existing iperf3 servers first
+docker exec oai-ext-dn pkill iperf3 2>/dev/null || true
+sleep 1
+
+# Start iperf3 servers with IPv4 flag (-4) to ensure proper listening
+if docker exec -d oai-ext-dn iperf3 -s -p 5201 -4 >> "$LOG_FILE" 2>&1; then
+    log_success "iperf3 server started on port 5201 (IPv4)"
+else
+    log_error "Failed to start iperf3 server on port 5201"
+fi
+
+if docker exec -d oai-ext-dn iperf3 -s -p 5202 -4 >> "$LOG_FILE" 2>&1; then
+    log_success "iperf3 server started on port 5202 (IPv4)"
+else
+    log_error "Failed to start iperf3 server on port 5202"
+fi
+
+# Verify iperf3 servers are running
+sleep 2
+IPERF_PROCS=$(docker exec oai-ext-dn pgrep -c iperf3 || echo "0")
+if [ "$IPERF_PROCS" -ge 2 ]; then
+    log_success "iperf3 servers verified running ($IPERF_PROCS processes)"
+else
+    log_warning "Expected 2 iperf3 servers, found $IPERF_PROCS"
+fi
+echo ""
+
+# Step 8.2: Start traffic generator
+log "Step 8.2: Starting traffic generator..."
+cd ..
+TRAFFIC_LOG="$LOG_DIR/traffic_gen_final.log"
+AGENT_LOG="$LOG_DIR/agent.log"
+
+# Kill any existing traffic generator and log streaming
+pkill -f "traffic_gen_FINAL.py" 2>/dev/null || true
+pkill -f "tail -f.*traffic_gen_final.log" 2>/dev/null || true
+sleep 1
+
+# Initialize agent.log with header
+echo "=== 5G Network Traffic Generation Log ===" > "$AGENT_LOG"
+echo "=== Started: $(date) ===" >> "$AGENT_LOG"
+echo "" >> "$AGENT_LOG"
+chmod 666 "$AGENT_LOG" 2>/dev/null || true
+
+# Start traffic generator in background
+if python3 traffic_gen_FINAL.py > "$TRAFFIC_LOG" 2>&1 &
+then
+    TRAFFIC_PID=$!
+    sleep 3
+
+    # Verify traffic generator is still running
+    if kill -0 $TRAFFIC_PID 2>/dev/null; then
+        log_success "Traffic generator started (PID: $TRAFFIC_PID)"
+        log "Traffic log: $TRAFFIC_LOG"
+
+        # Wait a few seconds and check if traffic is being generated
+        sleep 5
+        if tail -10 "$TRAFFIC_LOG" | grep -q "Starting iteration\|records inserted"; then
+            log_success "Traffic generation confirmed - data flowing to InfluxDB/Kinetica"
+
+            # Start log streaming to agent.log for Streamlit
+            tail -f "$TRAFFIC_LOG" >> "$AGENT_LOG" 2>&1 &
+            LOG_STREAM_PID=$!
+            log_success "Log streaming to Streamlit started (PID: $LOG_STREAM_PID)"
+        else
+            log_warning "Traffic generator running but no data flow detected yet"
+        fi
+    else
+        log_error "Traffic generator failed to start or crashed immediately"
+    fi
+else
+    log_error "Failed to start traffic generator"
+fi
+cd docker
+echo ""
+
 # Step 9: Display system status
 log "Step 9: System Status Summary"
 echo ""
@@ -196,11 +356,18 @@ echo "  - View FlexRIC logs: docker logs -f flexric"
 echo "  - View gNodeB logs: docker logs -f oai-gnb"
 echo "  - View UE logs: docker logs -f oai-ue-slice1"
 echo ""
+echo "Traffic Generation:"
+echo "  - Traffic generator log: tail -f $TRAFFIC_LOG"
+echo "  - iperf3 servers running on: oai-ext-dn (192.168.70.135:5201, 5202)"
+echo "  - Stop traffic: pkill -f traffic_gen_FINAL.py"
+echo ""
 echo "Monitoring & Visualization:"
 echo "  - Streamlit UI: http://localhost:8501"
 echo "  - Grafana: http://localhost:9002 (admin/admin)"
 echo "  - InfluxDB: http://localhost:9001"
 echo "  - Kinetica Workbench: http://localhost:8000 (admin/Admin123!)"
+echo ""
+echo "NOTE: It may take 30-60 seconds for traffic data to appear in Grafana/Streamlit"
 echo ""
 echo "Management:"
 echo "  - Stop the lab: ./lab_stop.sh"
