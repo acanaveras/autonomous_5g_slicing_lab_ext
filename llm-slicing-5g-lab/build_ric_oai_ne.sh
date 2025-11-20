@@ -36,7 +36,8 @@ fi
 # Step 0.1: Install ASN1C manually (more reliable than OAI's build_oai -I)
 if [ ! -f "/opt/asn1c/bin/asn1c" ]; then
     echo ">>> Installing ASN1C from source..."
-    sudo apt-get install -y bison flex
+    sudo apt-get update
+    sudo apt-get install -y bison flex autoconf automake libtool
 
     # Clean any previous attempts
     sudo rm -rf /tmp/asn1c
