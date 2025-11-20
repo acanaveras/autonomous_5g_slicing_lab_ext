@@ -30,9 +30,28 @@ sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
 
 # Step 1: Clone and build openairinterface5g
 echo ">>> Cloning and building openairinterface5g..."
-git clone https://gitlab.eurecom.fr/oai/openairinterface5g
-cd openairinterface5g || { echo "Failed to enter openairinterface5g directory"; exit 1; }
-git checkout slicing-spring-of-code
+
+# Handle existing directory
+if [ -d "openairinterface5g" ]; then
+    echo ">>> openairinterface5g directory exists, checking contents..."
+    if [ -d "openairinterface5g/.git" ]; then
+        echo ">>> Updating existing repository..."
+        cd openairinterface5g || { echo "Failed to enter openairinterface5g directory"; exit 1; }
+        git fetch origin
+        git checkout slicing-spring-of-code
+        git pull origin slicing-spring-of-code || true
+    else
+        echo ">>> Removing empty directory and cloning..."
+        rm -rf openairinterface5g
+        git clone https://gitlab.eurecom.fr/oai/openairinterface5g
+        cd openairinterface5g || { echo "Failed to enter openairinterface5g directory"; exit 1; }
+        git checkout slicing-spring-of-code
+    fi
+else
+    git clone https://gitlab.eurecom.fr/oai/openairinterface5g
+    cd openairinterface5g || { echo "Failed to enter openairinterface5g directory"; exit 1; }
+    git checkout slicing-spring-of-code
+fi
 cd cmake_targets || { echo "Failed to enter cmake_targets"; exit 1; }
 
 # Build openairinterface5g
@@ -44,9 +63,28 @@ cd "$INITIAL_DIR" || { echo "Failed to return to initial directory"; exit 1; }
 
 # Step 3: Clone and build flexric
 echo ">>> Cloning and building flexric..."
-git clone https://gitlab.eurecom.fr/mosaic5g/flexric
-cd flexric || { echo "Failed to enter flexric directory"; exit 1; }
-git checkout slicing-spring-of-code
+
+# Handle existing directory
+if [ -d "flexric" ]; then
+    echo ">>> flexric directory exists, checking contents..."
+    if [ -d "flexric/.git" ]; then
+        echo ">>> Updating existing repository..."
+        cd flexric || { echo "Failed to enter flexric directory"; exit 1; }
+        git fetch origin
+        git checkout slicing-spring-of-code
+        git pull origin slicing-spring-of-code || true
+    else
+        echo ">>> Removing empty directory and cloning..."
+        rm -rf flexric
+        git clone https://gitlab.eurecom.fr/mosaic5g/flexric
+        cd flexric || { echo "Failed to enter flexric directory"; exit 1; }
+        git checkout slicing-spring-of-code
+    fi
+else
+    git clone https://gitlab.eurecom.fr/mosaic5g/flexric
+    cd flexric || { echo "Failed to enter flexric directory"; exit 1; }
+    git checkout slicing-spring-of-code
+fi
 
 # Step 4: Copy necessary files
 cp "$INITIAL_DIR/xapp_rc_slice_dynamic.c" examples/xApp/c/ctrl/ || { echo "Failed to copy xapp_rc_slice_dynamic.c"; exit 1; }
