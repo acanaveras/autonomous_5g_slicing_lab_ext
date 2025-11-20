@@ -36,6 +36,7 @@ services:
     image: grafana/grafana:latest
     container_name: grafana
     hostname: grafana
+    user: "0:0"  # Run as root to avoid permission issues with mounted volumes
     networks:
       demo-oai-public-net:
         ipv4_address: 192.168.70.171
