@@ -82,6 +82,21 @@ log "Starting lab initialization..."
 log "Log file: $LOG_FILE"
 echo ""
 
+# Step -1: Install Python dependencies
+log "Checking Python dependencies..."
+if [ -f "../requirements.txt" ]; then
+    log "Installing Python dependencies from requirements.txt..."
+    pip3 install -r ../requirements.txt 2>&1 | tee -a "$LOG_FILE"
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
+        log_success "Python dependencies installed"
+    else
+        log_warning "Failed to install some Python dependencies"
+    fi
+else
+    log_warning "requirements.txt not found in parent directory"
+fi
+echo ""
+
 # Step 0: Build RIC and OAI Network Elements (if not already built)
 log "Step 0: Building RIC and OAI Network Elements..."
 cd ..
