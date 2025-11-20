@@ -233,7 +233,7 @@ logger.info(f"Using UE IP: {ue_ip}")
 
 t1 = threading.Thread(target=iperf_runner_continuous, args=(
     "oai-ue-slice1", "UE1", ue_ip, "192.168.70.135", 5201, "30M", 60,
-    "/home/ubuntu/autonomous_5g_slicing_lab_ext/llm-slicing-5g-lab/logs/UE1_iperfc.log"
+    os.path.join(os.getcwd(), "logs", "UE1_iperfc.log")
 ), daemon=False)
 
 t1.start()
