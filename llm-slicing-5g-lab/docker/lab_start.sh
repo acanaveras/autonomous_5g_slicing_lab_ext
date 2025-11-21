@@ -11,6 +11,9 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Define root directory dynamically (2 levels up from docker/)
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 LOG_DIR="$SCRIPT_DIR/../logs"
 mkdir -p "$LOG_DIR"
 
@@ -82,11 +85,11 @@ log "Starting lab initialization..."
 log "Log file: $LOG_FILE"
 echo ""
 
-# Step -2: Install System Build Dependencies
-log "Step -2: Checking System Build Dependencies..."
+# Step 1: Install System Build Dependencies
+log "Step 1: Checking System Build Dependencies..."
 # Check if autoreconf exists, if not, install the suite
 if ! command -v autoreconf &> /dev/null; then
-    log "Installing autotools, bison, flex, and build-essential..."
+    log "Installing autoconf, automake, libtool, autotools, bison, flex, build-essential, cmake"
     # Using sudo as this modifies the system
     sudo apt-get update
     sudo apt-get install -y autoconf automake libtool bison flex build-essential cmake
@@ -102,7 +105,7 @@ else
 fi
 echo ""
 
-# Step -1: Install Python dependencies
+# Step 2: Install Python dependencies
 log "Checking Python dependencies..."
 # --- ADDED: FIX FOR BROKEN VENV/MISSING PIP ---
 log "Ensuring pip is installed and up to date..."
@@ -111,9 +114,9 @@ python3 -m ensurepip --upgrade 2>/dev/null || true
 # This ensures we have the latest pip
 python3 -m pip install --upgrade pip 2>/dev/null || true
 # ---------------------------------------------
-if [ -f "../requirements.txt" ]; then
+if [ -f "$ROOT_DIR/requirements.txt" ]; then
     log "Installing Python dependencies from requirements.txt..."
-    pip3 install -r ../requirements.txt 2>&1 | tee -a "$LOG_FILE"
+    pip3 install -r "$ROOT_DIR/requirements.txt" 2>&1 | tee -a "$LOG_FILE"
     if [ ${PIPESTATUS[0]} -eq 0 ]; then
         log_success "Python dependencies installed"
     else
@@ -124,8 +127,8 @@ else
 fi
 echo ""
 
-# Step 0: Build RIC and OAI Network Elements (if not already built)
-log "Step 0: Building RIC and OAI Network Elements..."
+# Step 3: Build RIC and OAI Network Elements (if not already built)
+log "Step 3: Building RIC and OAI Network Elements..."
 cd ..
 # Check if binaries actually exist, not just directories
 if [ -f "flexric/build/examples/ric/nearRT-RIC" ] && [ -f "openairinterface5g/cmake_targets/ran_build/build/nr-softmodem" ]; then
@@ -144,8 +147,8 @@ fi
 cd docker
 echo ""
 
-# Step 0.1: Build FlexRIC Docker Image
-log "Step 0.1: Building FlexRIC Docker Image..."
+# Step 4: Build FlexRIC Docker Image
+log "Step 4: Building FlexRIC Docker Image..."
 if docker images | grep -q "flexric-5g-slicing"; then
     log_success "FlexRIC image already exists, skipping build..."
 else
@@ -161,8 +164,8 @@ else
 fi
 echo ""
 
-# Step 0.2: Build gNodeB Docker Image
-log "Step 0.2: Building gNodeB Docker Image..."
+# Step 5: Build gNodeB Docker Image
+log "Step 5: Building gNodeB Docker Image..."
 if docker images | grep -q "oai-gnb-5g-slicing"; then
     log_success "gNodeB image already exists, skipping build..."
 else
@@ -178,8 +181,8 @@ else
 fi
 echo ""
 
-# Step 0.3: Build UE Docker Image
-log "Step 0.3: Building UE Docker Image..."
+# Step 6: Build UE Docker Image
+log "Step 6: Building UE Docker Image..."
 if docker images | grep -q "oai-ue-5g-slicing"; then
     log_success "UE image already exists, skipping build..."
 else
@@ -195,8 +198,8 @@ else
 fi
 echo ""
 
-# Step 0.4: Build Streamlit Docker Image
-log "Step 0.4: Building Streamlit UI Docker Image..."
+# Step 7: Build Streamlit Docker Image
+log "Step 7: Building Streamlit UI Docker Image..."
 if docker images | grep -q "streamlit-5g-ui"; then
     log_success "Streamlit image already exists, skipping build..."
 else
@@ -211,8 +214,8 @@ else
 fi
 echo ""
 
-# Step 1: Check if Docker network exists
-log "Step 1: Checking Docker network..."
+# Step 8: Check if Docker network exists
+log "Step 8: Checking Docker network..."
 if docker network inspect demo-oai-public-net &>/dev/null; then
     log_success "Docker network demo-oai-public-net exists"
 else
@@ -226,8 +229,8 @@ else
 fi
 echo ""
 
-# Step 2: Start 5G Core Network (Slice 1)
-log "Step 2: Starting 5G Core Network (Slice 1)..."
+# Step 9: Start 5G Core Network (Slice 1)
+log "Step 9: Starting 5G Core Network (Slice 1)..."
 cd ..
 docker compose -f docker-compose-oai-cn-slice1.yaml up -d 2>&1 | tee -a "$LOG_FILE"
 wait_for_healthy "oai-amf"
@@ -236,16 +239,16 @@ wait_for_healthy "oai-upf-slice1"
 log_success "5G Core Network (Slice 1) is running"
 echo ""
 
-# Step 3: Start 5G Core Network (Slice 2)
-log "Step 3: Starting 5G Core Network (Slice 2)..."
+# Step 10: Start 5G Core Network (Slice 2)
+log "Step 10: Starting 5G Core Network (Slice 2)..."
 docker compose -f docker-compose-oai-cn-slice2.yaml up -d 2>&1 | tee -a "$LOG_FILE"
 wait_for_healthy "oai-smf-slice2"
 wait_for_healthy "oai-upf-slice2"
 log_success "5G Core Network (Slice 2) is running"
 echo ""
 
-# Step 4: Start FlexRIC and gNodeB
-log "Step 4: Starting FlexRIC and gNodeB..."
+# Step 11: Start FlexRIC and gNodeB
+log "Step 11: Starting FlexRIC and gNodeB..."
 cd docker
 docker compose -f docker-compose-gnb.yaml up -d 2>&1 | tee -a "$LOG_FILE"
 wait_for_healthy "flexric" 60
@@ -253,8 +256,8 @@ wait_for_healthy "oai-gnb" 60
 log_success "FlexRIC and gNodeB are running"
 echo ""
 
-# Step 5: Wait for E2 connection
-log "Step 5: Verifying E2 connection between gNodeB and FlexRIC..."
+# Step 12: Wait for E2 connection
+log "Step 12: Verifying E2 connection between gNodeB and FlexRIC..."
 sleep 5
 if docker logs oai-gnb 2>&1 | grep -q "E2 SETUP"; then
     log_success "E2 connection established"
@@ -263,15 +266,15 @@ else
 fi
 echo ""
 
-# Step 6: Start UE (Slice 1 only for now due to TUN interface limitation)
-log "Step 6: Starting UE (Slice 1)..."
+# Step 13: Start UE (Slice 1 only for now due to TUN interface limitation)
+log "Step 13: Starting UE (Slice 1)..."
 docker compose -f docker-compose-ue-host.yaml up -d oai-ue-slice1 2>&1 | tee -a "$LOG_FILE"
 wait_for_healthy "oai-ue-slice1" 60
 log_success "UE (Slice 1) is running"
 echo ""
 
-# Step 7: Verify UE connection
-log "Step 7: Verifying UE connection..."
+# Step 14: Verify UE connection
+log "Step 14: Verifying UE connection..."
 sleep 10
 if docker logs oai-ue-slice1 2>&1 | grep -q "REGISTRATION ACCEPT"; then
     log_success "UE successfully registered with 5G Core"
@@ -286,8 +289,8 @@ else
 fi
 echo ""
 
-# Step 8: Start Monitoring Stack (Optional)
-log "Step 8: Starting Monitoring Stack (InfluxDB, Grafana, Kinetica, Streamlit)..."
+# Step 15: Start Monitoring Stack (Optional)
+log "Step 15: Starting Monitoring Stack (InfluxDB, Grafana, Kinetica, Streamlit)..."
 if docker compose -f docker-compose-monitoring.yaml up -d 2>&1 | tee -a "$LOG_FILE"; then
     log "Monitoring services starting..."
     wait_for_healthy "influxdb" 60
@@ -300,8 +303,8 @@ else
 fi
 echo ""
 
-# Step 8.1: Start iperf3 servers on external DN
-log "Step 8.1: Starting iperf3 servers on external data network..."
+# Step 16: Start iperf3 servers on external DN
+log "Step 16: Starting iperf3 servers on external data network..."
 
 # Kill any existing iperf3 servers first
 docker exec oai-ext-dn pkill iperf3 2>/dev/null || true
@@ -330,8 +333,8 @@ else
 fi
 echo ""
 
-# Step 8.2: Start traffic generator
-log "Step 8.2: Starting traffic generator..."
+# Step 17: Start traffic generator
+log "Step 17: Starting traffic generator..."
 cd ..
 TRAFFIC_LOG="$LOG_DIR/traffic_gen_final.log"
 AGENT_LOG="$LOG_DIR/agent.log"
@@ -379,15 +382,15 @@ fi
 cd docker
 echo ""
 
-# Step 9: Display system status
-log "Step 9: System Status Summary"
+# Step 18: Display system status
+log "Step 18: System Status Summary"
 echo ""
 echo "Running Containers:"
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "NAME|oai-|flexric|influx|grafana|kinetica|streamlit"
 echo ""
 
-# Step 10: Quick connectivity test
-log "Step 10: Testing UE connectivity..."
+# Step 19: Quick connectivity test
+log "Step 19: Testing UE connectivity..."
 if docker exec oai-ue-slice1 ping -I oaitun_ue1 -c 2 8.8.8.8 &>/dev/null; then
     log_success "UE has internet connectivity!"
 else
