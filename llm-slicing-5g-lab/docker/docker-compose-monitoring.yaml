@@ -125,7 +125,7 @@ services:
       - GRAFANA_URL=http://192.168.70.171:3000
     volumes:
       - ../../agentic-llm/config.yaml:/app/config.yaml:ro
-      - ../../agentic-llm/.env:/app/.env:ro
+      - ../../.env:/app/.env:ro
       - ../logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]

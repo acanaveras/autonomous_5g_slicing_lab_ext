@@ -29,7 +29,7 @@ COPY agentic-llm/agents.py /app/
 COPY agentic-llm/tools.py /app/
 COPY agentic-llm/langgraph_agent.py /app/
 COPY agentic-llm/config.yaml /app/
-COPY agentic-llm/.env /app/
+COPY .env /app/
 
 # Create necessary directories
 RUN mkdir -p /app/logs
