@@ -28,7 +28,7 @@ import os
 import signal
 import yaml
 from gpudb import GPUdb
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 import json
 import logging
 import colorlog
@@ -67,7 +67,7 @@ WINDOW_SIZE_SECONDS = 60
 process = None
 logs = []
 
-load_dotenv("../llm-slicing-5g-lab/.env")
+load_dotenv(find_dotenv())
 kdbc_options = GPUdb.Options()
 kdbc_options.username = os.environ.get("KINETICA_USERNAME")
 kdbc_options.password = os.environ.get("KINETICA_PASSWORD")
@@ -78,7 +78,7 @@ kdbc: GPUdb = GPUdb(
 )
 
 def generate_sql_query(ue:str):
-    load_dotenv("../llm-slicing-5g-lab/.env")
+    load_dotenv(find_dotenv())
     return f"""
             SELECT
                 "timestamp",

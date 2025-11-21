@@ -1,6 +1,6 @@
 import os
 import sys
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 import gradio as gr
 
 try:
@@ -15,7 +15,7 @@ except ImportError as e:
 
 def main():
 
-    load_dotenv()
+    load_dotenv(find_dotenv())
     print("--- Agent Service Started ---")
 
     if not os.getenv("NVIDIA_API_KEY"):

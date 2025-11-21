@@ -22,7 +22,7 @@ from langchain_core.tools import tool
 import subprocess
 import yaml
 import logging
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 import gpudb
 
 
@@ -101,7 +101,7 @@ def get_packetloss_logs() -> str:
     time.sleep(5) # wait for db to get updated
     iperf_random_table_name: str = os.environ.get('IPERF3_RANDOM_TABLE_NAME')
     # Just to be sure we have the latest randomly generated table name
-    load_dotenv("../llm-slicing-5g-lab/.env")
+    load_dotenv(find_dotenv())
         
     sql_query = f"SELECT lost_packets, loss_percentage, UE FROM {os.environ.get('IPERF3_RANDOM_TABLE_NAME')} ORDER BY timestamp DESC LIMIT 20;"
     result_df: pd.DataFrame = kdbc.to_df(

@@ -28,7 +28,7 @@ import os
 import signal
 import yaml
 from gpudb import GPUdb
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 import json
 import logging
 import colorlog
@@ -158,7 +158,7 @@ def start():
     global process
     try:
         # Load environment variables for NVIDIA API key
-        load_dotenv()
+        load_dotenv(find_dotenv())
 
         logger.info("Starting LangGraph AI Agent...")
         process = subprocess.Popen(

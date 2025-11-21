@@ -24,10 +24,10 @@ from langgraph.graph import StateGraph, MessagesState
 from langgraph.prebuilt import create_react_agent
 from tools import reconfigure_network, get_packetloss_logs
 import logging
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv(find_dotenv())
 
 print("___________________________________________starting agents")
 
