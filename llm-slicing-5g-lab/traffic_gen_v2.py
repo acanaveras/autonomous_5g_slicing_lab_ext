@@ -10,12 +10,12 @@ logger = logging.getLogger(__name__)
 # Configure Kinetica
 os.environ["KINETICA_HOST"] = "localhost:9191"
 os.environ["KINETICA_USERNAME"] = "admin"
-os.environ["KINETICA_PASSWORD"] = "Admin123!"
+os.environ["KINETICA_PASSWORD"] = "admin"
 
 from gpudb import GPUdb
 kdbc_options = GPUdb.Options()
 kdbc_options.username = "admin"
-kdbc_options.password = "Admin123!"
+kdbc_options.password = "admin"
 kdbc_options.disable_auto_discovery = True
 kdbc = GPUdb(host="localhost:9191", options=kdbc_options)
 

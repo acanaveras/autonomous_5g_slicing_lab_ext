@@ -74,7 +74,7 @@ if "KINETICA_HOST" not in os.environ:
 if "KINETICA_USERNAME" not in os.environ:
     os.environ["KINETICA_USERNAME"] = "admin"
 if "KINETICA_PASSWORD" not in os.environ:
-    os.environ["KINETICA_PASSWORD"] = "Admin123!"
+    os.environ["KINETICA_PASSWORD"] = "admin"
 if "KINETICA_SCHEMA" not in os.environ:
     os.environ["KINETICA_SCHEMA"] = "nvidia_gtc_dli_2025"
 

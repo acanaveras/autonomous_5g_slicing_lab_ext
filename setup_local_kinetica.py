@@ -17,7 +17,7 @@ def setup_local_kinetica():
     # Set environment variables for local Kinetica
     os.environ["KINETICA_HOST"] = "localhost:9191"
     os.environ["KINETICA_USERNAME"] = "admin"
-    os.environ["KINETICA_PASSWORD"] = "Admin123!"
+    os.environ["KINETICA_PASSWORD"] = "admin"
     os.environ["KINETICA_SCHEMA"] = "nvidia_gtc_dli_2025"
     
     print("✅ Environment variables configured for local Kinetica instance")

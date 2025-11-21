@@ -37,7 +37,7 @@ logging.basicConfig(
 # Configure for Kinetica instance (use container IP when running in Docker)
 os.environ["KINETICA_HOST"] = os.getenv("KINETICA_HOST", "192.168.70.172:9191")
 os.environ["KINETICA_USERNAME"] = os.getenv("KINETICA_USERNAME", "admin")
-os.environ["KINETICA_PASSWORD"] = os.getenv("KINETICA_PASSWORD", "Admin123!")
+os.environ["KINETICA_PASSWORD"] = os.getenv("KINETICA_PASSWORD", "admin")
 os.environ["KINETICA_SCHEMA"] = os.getenv("KINETICA_SCHEMA", "nvidia_gtc_dli_2025")
 
 kdbc_options = gpudb.GPUdb.Options()

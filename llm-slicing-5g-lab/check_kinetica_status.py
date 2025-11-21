@@ -27,7 +27,7 @@ print("\n2️⃣ Connecting to Kinetica...")
 try:
     kdbc_options = GPUdb.Options()
     kdbc_options.username = "admin"
-    kdbc_options.password = "Admin123!"
+    kdbc_options.password = "admin"  # Actual Kinetica password
     kdbc_options.disable_auto_discovery = True
     kdbc = GPUdb(host="localhost:9191", options=kdbc_options)
     print("   ✅ Connected to Kinetica at localhost:9191")
@@ -134,4 +134,4 @@ print(f"   - Kinetica URL: http://localhost:8080/gadmin")
 print(f"   - Schema: {target_schema}")
 print(f"   - Table: {FIXED_TABLE_NAME}")
 print(f"   - Username: admin")
-print(f"   - Password: Admin123!")
+print(f"   - Password: admin")

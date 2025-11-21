@@ -8,7 +8,7 @@ set -e
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KINETICA_SCRIPT="$SCRIPT_DIR/kinetica"
-ADMIN_PASSWORD="Admin123!"  # Set your desired password here
+ADMIN_PASSWORD="admin"  # Kinetica default password
 PERSIST_DIR="$SCRIPT_DIR/kinetica-data"  # Data persistence directory
 
 # Export the password so the script can use it
