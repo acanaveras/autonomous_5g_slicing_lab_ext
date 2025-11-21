@@ -104,6 +104,13 @@ echo ""
 
 # Step -1: Install Python dependencies
 log "Checking Python dependencies..."
+# --- ADDED: FIX FOR BROKEN VENV/MISSING PIP ---
+log "Ensuring pip is installed and up to date..."
+# This fixes the "No module named pip" error
+python3 -m ensurepip --upgrade 2>/dev/null || true
+# This ensures we have the latest pip
+python3 -m pip install --upgrade pip 2>/dev/null || true
+# ---------------------------------------------
 if [ -f "../requirements.txt" ]; then
     log "Installing Python dependencies from requirements.txt..."
     pip3 install -r ../requirements.txt 2>&1 | tee -a "$LOG_FILE"
@@ -341,7 +348,7 @@ echo "" >> "$AGENT_LOG"
 chmod 666 "$AGENT_LOG" 2>/dev/null || true
 
 # Start traffic generator in background
-if python3.10 traffic_gen_FINAL.py > "$TRAFFIC_LOG" 2>&1 &
+if python3 traffic_gen_FINAL.py > "$TRAFFIC_LOG" 2>&1 &
 then
     TRAFFIC_PID=$!
     sleep 3
