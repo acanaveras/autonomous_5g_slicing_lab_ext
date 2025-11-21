@@ -167,7 +167,7 @@ elif [ "$((running_containers - 1))" -gt 0 ]; then
     echo "  - Streamlit UI: http://localhost:8501"
     echo "  - Grafana: http://localhost:9002 (admin/admin)"
     echo "  - InfluxDB: http://localhost:9001"
-    echo "  - Kinetica Workbench: http://localhost:8000 (admin/Admin123!)"
+    echo "  - Kinetica Workbench: http://localhost:8000 (admin/admin)"
     echo ""
     echo "Management:"
     echo "  - Stop lab: ./lab_stop.sh"

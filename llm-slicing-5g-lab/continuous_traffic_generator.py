@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # Configure Kinetica connection
 os.environ["KINETICA_HOST"] = "localhost:9191"
 os.environ["KINETICA_USERNAME"] = "admin"
-os.environ["KINETICA_PASSWORD"] = "Admin123!"
+os.environ["KINETICA_PASSWORD"] = "admin"
 os.environ["KINETICA_SCHEMA"] = "nvidia_gtc_dli_2025"
 
 kdbc_options = GPUdb.Options()

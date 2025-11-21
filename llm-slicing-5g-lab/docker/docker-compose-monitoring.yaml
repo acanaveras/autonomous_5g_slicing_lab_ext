@@ -82,7 +82,7 @@ services:
       - "5434:5434"   # Postgres Wire
     environment:
       - KINETICA_ACCEPT_LICENSE=Y
-      - KINETICA_ADMIN_PASSWORD=Admin123!
+      - KINETICA_ADMIN_PASSWORD=admin
     volumes:
       - ../kinetica-data:/opt/gpudb/persist
       - ./kinetica-start.sh:/kinetica-start.sh
@@ -116,7 +116,7 @@ services:
     environment:
       - KINETICA_HOST=192.168.70.172:9191
       - KINETICA_USERNAME=admin
-      - KINETICA_PASSWORD=Admin123!
+      - KINETICA_PASSWORD=admin
       - KINETICA_SCHEMA=nvidia_gtc_dli_2025
       - INFLUXDB_URL=http://192.168.70.170:8086
       - INFLUXDB_TOKEN=5g-lab-token

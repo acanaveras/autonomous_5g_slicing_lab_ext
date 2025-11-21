@@ -53,7 +53,7 @@ try:
 
     kdbc_options = GPUdb.Options()
     kdbc_options.username = "admin"
-    kdbc_options.password = "Admin123!"
+    kdbc_options.password = "admin"  # Using actual Kinetica password
     kdbc_options.disable_auto_discovery = True
     kdbc = GPUdb(host="localhost:9191", options=kdbc_options)
     FIXED_TABLE_NAME = "nvidia_gtc_dli_2025.iperf3_logs"
