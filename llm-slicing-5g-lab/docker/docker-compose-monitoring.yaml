@@ -123,6 +123,9 @@ services:
       - INFLUXDB_ORG=5g-lab
       - INFLUXDB_BUCKET=5g-metrics
       - GRAFANA_URL=http://192.168.70.171:3000
+      - GRAFANA_DASHBOARD_ID=${GRAFANA_DASHBOARD_ID}
+    env_file:
+      - ../../.env
     volumes:
       - ../../agentic-llm/config.yaml:/app/config.yaml:ro
       - ../../.env:/app/.env:ro
