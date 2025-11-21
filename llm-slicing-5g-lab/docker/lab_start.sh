@@ -337,7 +337,7 @@ TRAFFIC_LOG="$LOG_DIR/traffic_gen_final.log"
 AGENT_LOG="$LOG_DIR/agent.log"
 
 # Kill any existing traffic generator and log streaming
-pkill -f "traffic_gen_FINAL.py" 2>/dev/null || true
+pkill -f "generate_traffic.py" 2>/dev/null || true
 pkill -f "tail -f.*traffic_gen_final.log" 2>/dev/null || true
 sleep 1
 
@@ -348,7 +348,7 @@ echo "" >> "$AGENT_LOG"
 chmod 666 "$AGENT_LOG" 2>/dev/null || true
 
 # Start traffic generator in background
-if python3 traffic_gen_FINAL.py > "$TRAFFIC_LOG" 2>&1 &
+if python3 generate_traffic.py > "$TRAFFIC_LOG" 2>&1 &
 then
     TRAFFIC_PID=$!
     sleep 3
@@ -407,7 +407,7 @@ echo ""
 echo "Traffic Generation:"
 echo "  - Traffic generator log: tail -f $TRAFFIC_LOG"
 echo "  - iperf3 servers running on: oai-ext-dn (192.168.70.135:5201, 5202)"
-echo "  - Stop traffic: pkill -f traffic_gen_FINAL.py"
+echo "  - Stop traffic: pkill -f generate_traffic.py"
 echo ""
 echo "Monitoring & Visualization:"
 echo "  - Streamlit UI: http://localhost:8501"

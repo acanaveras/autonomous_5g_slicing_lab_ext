@@ -48,11 +48,11 @@ echo ""
 
 # Step 0: Stop Traffic Generator and Log Streaming
 log "Step 0: Stopping traffic generator and log streaming..."
-TRAFFIC_PIDS=$(pgrep -f "traffic_gen_FINAL.py" || echo "")
+TRAFFIC_PIDS=$(pgrep -f "generate_traffic.py" || echo "")
 LOG_STREAM_PIDS=$(pgrep -f "tail -f.*traffic_gen_final.log" || echo "")
 
 if [ -n "$TRAFFIC_PIDS" ]; then
-    pkill -f "traffic_gen_FINAL.py" >> "$LOG_FILE" 2>&1 || true
+    pkill -f "generate_traffic.py" >> "$LOG_FILE" 2>&1 || true
     log_success "Traffic generator stopped"
 else
     log "No traffic generator running"
