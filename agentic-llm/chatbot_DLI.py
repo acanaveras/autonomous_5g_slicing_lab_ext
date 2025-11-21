@@ -56,7 +56,7 @@ logger.propagate = False
 # Configuration: Paths for both log files
 config_file =  yaml.safe_load(open('config.yaml', 'r'))
 AGENT_LOG_FILE = config_file['AGENT_LOG_FILE']
-GRAPHANA_DASHBOARD = config_file['GRAPHANA_DASHBOARD']
+GRAPHANA_DASHBOARD = os.getenv('GRAFANA_DASHBOARD_ID', '')
 os.makedirs(os.path.dirname(AGENT_LOG_FILE), exist_ok=True)
 
 # Create the file if it doesn't exist
