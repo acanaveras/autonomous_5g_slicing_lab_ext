@@ -82,6 +82,26 @@ log "Starting lab initialization..."
 log "Log file: $LOG_FILE"
 echo ""
 
+# Step -2: Install System Build Dependencies
+log "Step -2: Checking System Build Dependencies..."
+# Check if autoreconf exists, if not, install the suite
+if ! command -v autoreconf &> /dev/null; then
+    log "Installing autotools, bison, flex, and build-essential..."
+    # Using sudo as this modifies the system
+    sudo apt-get update
+    sudo apt-get install -y autoconf automake libtool bison flex build-essential cmake
+    
+    if [ $? -eq 0 ]; then
+        log_success "System build dependencies installed"
+    else
+        log_error "Failed to install system dependencies. Please run manually."
+        exit 1
+    fi
+else
+    log_success "System build dependencies already present"
+fi
+echo ""
+
 # Step -1: Install Python dependencies
 log "Checking Python dependencies..."
 if [ -f "../requirements.txt" ]; then
