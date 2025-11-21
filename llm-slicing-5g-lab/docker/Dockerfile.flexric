@@ -1,0 +1,167 @@
+# SPDX-FileCopyrightText: Copyright (c) 2023-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Dockerfile for FlexRIC with custom xApp for 5G Network Slicing
+# Based on official FlexRIC Dockerfile with custom xApp integration
+#
+#---------------------------------------------------------------------
+# BUILDER IMAGE
+#---------------------------------------------------------------------
+ARG BASE_IMAGE=ubuntu:22.04
+
+FROM $BASE_IMAGE AS flexric-base
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe/Paris
+
+# Install build dependencies
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes && \
+    DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+       build-essential \
+       libsctp-dev \
+       git \
+       wget \
+       tar \
+       m4 \
+       automake \
+       libtool \
+       python3 \
+       cmake \
+       cmake-curses-gui \
+       bison \
+       flex \
+       gdb \
+       libpcre2-dev \
+       python3-dev \
+       python3-pip \
+       gcc-12 \
+       g++-12 \
+       mold \
+       ninja-build && \
+    apt-get clean
+
+# Install SWIG 4.1 (required for FlexRIC)
+RUN git clone https://github.com/swig/swig.git && \
+    cd swig && \
+    git checkout release-4.1 && \
+    ./autogen.sh && \
+    ./configure --prefix=/usr/ && \
+    make -j8 && \
+    make install && \
+    ldconfig
+
+#---------------------------------------------------------------------
+# BUILD FLEXRIC
+#---------------------------------------------------------------------
+FROM flexric-base AS flexric-builder
+
+# Clone FlexRIC from specific branch
+WORKDIR /workspace
+RUN git clone https://gitlab.eurecom.fr/mosaic5g/flexric.git && \
+    cd flexric && \
+    git checkout slicing-spring-of-code
+
+# Copy custom xApp files
+COPY extra_files/xapp_rc_slice_dynamic.c /workspace/flexric/examples/xApp/c/ctrl/
+COPY extra_files/CMakeLists.txt /workspace/flexric/examples/xApp/c/ctrl/
+
+# Build FlexRIC with custom xApp
+WORKDIR /workspace/flexric
+RUN mkdir -p build && \
+    cd build && \
+    cmake -GNinja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_C_FLAGS_RELEASE="-O3" \
+          -DCMAKE_CXX_FLAGS_RELEASE="-O3" \
+          -DCMAKE_C_COMPILER=gcc-12 \
+          -DCMAKE_CXX_COMPILER=g++-12 \
+          -DXAPP_MULTILANGUAGE=OFF \
+          .. && \
+    ninja && \
+    ninja install && \
+    echo "--- Checking nearRT-RIC binary ---" && \
+    ldd /workspace/flexric/build/examples/ric/nearRT-RIC && \
+    echo "--- Checking xApp shared library ---" && \
+    ldd /workspace/flexric/build/src/xApp/libe42_xapp_shared.so && \
+    echo "--- Checking custom xApp binary ---" && \
+    ls -lh /workspace/flexric/build/examples/xApp/c/ctrl/xapp_rc_slice_dynamic
+
+#---------------------------------------------------------------------
+# TARGET IMAGE
+#---------------------------------------------------------------------
+FROM $BASE_IMAGE AS flexric-runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe/Paris
+
+# Install runtime dependencies only
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes && \
+    DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+       psmisc \
+       gpg \
+       wget \
+       libsctp1 \
+       python3 \
+       python3-pip \
+       coreutils && \
+    apt-get autoremove -y && \
+    apt-get autoclean -y
+
+WORKDIR /flexric
+
+# Copy FlexRIC shared libraries
+COPY --from=flexric-builder \
+    /usr/local/lib/flexric/libmac_sm.so \
+    /usr/local/lib/flexric/libkpm_sm.so \
+    /usr/local/lib/flexric/librlc_sm.so \
+    /usr/local/lib/flexric/libslice_sm.so \
+    /usr/local/lib/flexric/libtc_sm.so \
+    /usr/local/lib/flexric/libgtp_sm.so \
+    /usr/local/lib/flexric/libpdcp_sm.so \
+    /usr/local/lib/flexric/librc_sm.so \
+    /usr/local/lib/flexric/
+
+# Copy xApp shared library
+COPY --from=flexric-builder \
+    /workspace/flexric/build/src/xApp/libe42_xapp_shared.so \
+    /usr/local/lib/
+
+# Copy nearRT-RIC binary
+COPY --from=flexric-builder \
+    /workspace/flexric/build/examples/ric/nearRT-RIC \
+    /usr/local/bin/nearRT-RIC
+
+# Copy xApp binaries
+COPY --from=flexric-builder \
+    /workspace/flexric/build/examples/xApp/c/ctrl/xapp_rc_slice_dynamic \
+    /usr/local/bin/xapp_rc_slice_dynamic
+
+# Create FlexRIC configuration directory and default config
+RUN mkdir -p /usr/local/etc/flexric && \
+    echo "[NEAR-RIC]" > /usr/local/etc/flexric/flexric.conf && \
+    echo "NEAR_RIC_IP = 0.0.0.0" >> /usr/local/etc/flexric/flexric.conf && \
+    echo "" >> /usr/local/etc/flexric/flexric.conf && \
+    echo "[XAPP]" >> /usr/local/etc/flexric/flexric.conf && \
+    echo "DB_DIR = /tmp/" >> /usr/local/etc/flexric/flexric.conf
+
+# Update library cache
+RUN ldconfig && \
+    echo "--- Verifying nearRT-RIC dependencies ---" && \
+    ldd /usr/local/bin/nearRT-RIC && \
+    echo "--- Verifying xApp dependencies ---" && \
+    ldd /usr/local/bin/xapp_rc_slice_dynamic && \
+    echo "--- Verifying config file ---" && \
+    cat /usr/local/etc/flexric/flexric.conf
+
+# Expose E2 and E42 interfaces
+# E2: Interface between RAN and RIC (36421)
+# E42: Interface for xApps to connect to RIC (36422)
+EXPOSE 36421/sctp
+EXPOSE 36422/sctp
+
+# Create logs directory
+RUN mkdir -p /flexric/logs
+
+# Default command: Run nearRT-RIC
+CMD ["stdbuf", "-o0", "nearRT-RIC"]

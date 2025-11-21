@@ -1,1 +1,12 @@
 *.env
+
+*.log
+
+*.pyc
+
+GenerativeAIExamples/
+
+# Database and Cache files
+agentic-llm/grafana_data/
+llm-slicing-5g-lab/kinetica-data/
+*.db

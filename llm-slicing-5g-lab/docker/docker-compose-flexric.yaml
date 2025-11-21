@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  flexric:
+    container_name: flexric
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.flexric
+    image: flexric-5g-slicing:latest
+    hostname: flexric
+    environment:
+      - TZ=Europe/Paris
+      # Default slice ratios (can be overridden)
+      - SLICE1_RATIO=50
+      - SLICE2_RATIO=50
+    volumes:
+      # Mount logs directory for persistence
+      - ../logs:/flexric/logs
+      # Mount FlexRIC configuration if customization is needed (commented out - using default config from image)
+      # - ./flexric-config:/usr/local/etc/flexric:ro
+    networks:
+      # Use host network for E2/SCTP connectivity with gNodeB
+      # This is required for proper SCTP communication
+      demo-oai-public-net:
+        ipv4_address: 192.168.70.150
+    # Alternative: Use host network mode if bridge doesn't work
+    # network_mode: host
+    privileged: false
+    cap_add:
+      - NET_ADMIN
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "nearRT-RIC"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  demo-oai-public-net:
+    external: true
+    name: demo-oai-public-net

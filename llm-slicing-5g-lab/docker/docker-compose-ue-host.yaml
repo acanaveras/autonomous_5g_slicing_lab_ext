@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  oai-ue-slice1:
+    container_name: oai-ue-slice1
+    image: oai-ue-5g-slicing:latest
+    hostname: oai-ue-slice1
+    privileged: true
+    network_mode: "host"
+    environment:
+      - TZ=Europe/Paris
+    volumes:
+      - ./ue-slice1.conf:/opt/oai-ue/etc/ue.conf:ro
+      - ./channelmod_rfsimu.conf:/opt/oai-ue/etc/channelmod_rfsimu.conf:ro
+      - ../logs:/opt/oai-ue/logs
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "nr-uesoftmodem"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+    command: >
+      /bin/bash -c "
+      echo 'Starting UE for Slice 1 with HOST networking...';
+      echo 'Configuration: /opt/oai-ue/etc/ue.conf';
+      echo 'IMSI: 001010000000001';
+      echo 'DNN: oai (Slice 1)';
+      echo 'Connecting to gNodeB at 192.168.70.151:4043';
+      /opt/oai-ue/bin/nr-uesoftmodem
+      -O /opt/oai-ue/etc/ue.conf
+      --sa
+      --rfsim
+      --rfsimulator.serveraddr 192.168.70.151
+      --numerology 1
+      --band 78
+      -C 3619200000
+      -r 106
+      -E
+      --log_config.global_log_level info
+      2>&1 | tee /opt/oai-ue/logs/UE_slice1_host.log
+      "
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  oai-ue-slice2:
+    container_name: oai-ue-slice2
+    image: oai-ue-5g-slicing:latest
+    hostname: oai-ue-slice2
+    privileged: true
+    network_mode: "host"
+    environment:
+      - TZ=Europe/Paris
+    volumes:
+      - ./ue-slice2.conf:/opt/oai-ue/etc/ue.conf:ro
+      - ./channelmod_rfsimu.conf:/opt/oai-ue/etc/channelmod_rfsimu.conf:ro
+      - ../logs:/opt/oai-ue/logs
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "nr-uesoftmodem"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+    command: >
+      /bin/bash -c "
+      echo 'Starting UE for Slice 2 with HOST networking...';
+      echo 'Configuration: /opt/oai-ue/etc/ue.conf';
+      echo 'IMSI: 001010000000002';
+      echo 'DNN: oai2 (Slice 2)';
+      echo 'Connecting to gNodeB at 192.168.70.151:4043';
+      echo 'Node number: 4 (creates oaitun_ue3)';
+      sleep 5;
+      /opt/oai-ue/bin/nr-uesoftmodem
+      -O /opt/oai-ue/etc/ue.conf
+      --sa
+      --rfsim
+      --rfsimulator.serveraddr 192.168.70.151
+      --numerology 1
+      --band 78
+      -C 3619200000
+      -r 106
+      -E
+      --node-number 4
+      --log_config.global_log_level info
+      2>&1 | tee /opt/oai-ue/logs/UE_slice2_host.log
+      "
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

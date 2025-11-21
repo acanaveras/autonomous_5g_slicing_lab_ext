@@ -1,0 +1,152 @@
+services:
+  influxdb:
+    image: influxdb:2.7
+    container_name: influxdb
+    hostname: influxdb
+    networks:
+      demo-oai-public-net:
+        ipv4_address: 192.168.70.170
+    ports:
+      - "9001:8086"
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=adminpassword
+      - DOCKER_INFLUXDB_INIT_ORG=5g-lab
+      - DOCKER_INFLUXDB_INIT_BUCKET=5g-metrics
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=5g-lab-token
+    volumes:
+      - ../../agentic-llm/influxdb_data:/var/lib/influxdb2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    hostname: grafana
+    user: "0:0"  # Run as root to avoid permission issues with mounted volumes
+    networks:
+      demo-oai-public-net:
+        ipv4_address: 192.168.70.171
+    ports:
+      - "9002:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_SERVER_ROOT_URL=http://localhost:9002
+    volumes:
+      - ../../agentic-llm/grafana_data:/var/lib/grafana
+      - ../../agentic-llm/grafana/provisioning:/etc/grafana/provisioning
+      - ../../agentic-llm/grafana/dashboards:/var/lib/grafana/dashboards
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  kinetica:
+    image: kinetica/kinetica-cpu:7.2.3.3.20251027125026.ga
+    container_name: kinetica
+    hostname: kinetica
+    user: "0:0"  # Run as root to avoid permission issues with mounted volumes
+    networks:
+      demo-oai-public-net:
+        ipv4_address: 192.168.70.172
+    ports:
+      - "8000:8000"   # Workbench
+      - "8080:8080"   # Admin Console
+      - "8088:8088"   # Reveal UI
+      - "9191:9191"   # Database REST
+      - "5434:5434"   # Postgres Wire
+    environment:
+      - KINETICA_ACCEPT_LICENSE=Y
+      - KINETICA_ADMIN_PASSWORD=Admin123!
+    volumes:
+      - ../kinetica-data:/opt/gpudb/persist
+      - ./kinetica-start.sh:/kinetica-start.sh
+    command: ["/bin/bash", "/kinetica-start.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/gpudb/core/bin/gpudb status | grep -q 'GPUdb.*Running' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
+    restart: unless-stopped
+    shm_size: 2gb
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  streamlit:
+    build:
+      context: ../..
+      dockerfile: llm-slicing-5g-lab/docker/Dockerfile.streamlit
+    image: streamlit-5g-ui:latest
+    container_name: streamlit
+    hostname: streamlit
+    networks:
+      demo-oai-public-net:
+        ipv4_address: 192.168.70.173
+    ports:
+      - "8501:8501"
+    environment:
+      - KINETICA_HOST=192.168.70.172:9191
+      - KINETICA_USERNAME=admin
+      - KINETICA_PASSWORD=Admin123!
+      - KINETICA_SCHEMA=nvidia_gtc_dli_2025
+      - INFLUXDB_URL=http://192.168.70.170:8086
+      - INFLUXDB_TOKEN=5g-lab-token
+      - INFLUXDB_ORG=5g-lab
+      - INFLUXDB_BUCKET=5g-metrics
+      - GRAFANA_URL=http://192.168.70.171:3000
+    volumes:
+      - ../../agentic-llm/config.yaml:/app/config.yaml:ro
+      - ../../agentic-llm/.env:/app/.env:ro
+      - ../logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      influxdb:
+        condition: service_healthy
+      grafana:
+        condition: service_healthy
+      kinetica:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  demo-oai-public-net:
+    external: true

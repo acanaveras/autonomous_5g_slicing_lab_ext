@@ -1,0 +1,2288 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2317
+
+# ---------------------------------------------------------------------------
+# File     : kinetica_docker.sh
+# Purpose  : Kinetica Docker installer for Linux and OSX, see help below.
+# Copyright: Kinetica Inc. (2025)
+# ---------------------------------------------------------------------------
+
+# readlink -f replacement for OSX, remove trailing / if any.
+readlinkf() { perl -MCwd -e 'print Cwd::abs_path shift' "${1%/}"; }
+
+# The directory of where this script was run from.
+THIS_SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+THIS_SCRIPT_NAME="${BASH_SOURCE[0]##*/}"
+THIS_SCRIPT_LINK=$(readlinkf "${BASH_SOURCE[0]}") # filepath that a symlink resolves to
+THIS_SCRIPT="$THIS_SCRIPT_DIR/$THIS_SCRIPT_NAME"  # filepath where this was run from
+
+DATETIME=$(date '+%Y%m%d_%H%M%S')
+
+# ---------------------------------------------------------------------------
+# echo_status KEY VALUE; Echos a padded string in the format "Key  : Value"
+
+ECHO_STATUS_WIDTH=16
+function echo_status
+{
+    printf "%-${ECHO_STATUS_WIDTH}s : %s\n" "$1" "$2"
+}
+
+# ---------------------------------------------------------------------------
+# Get backtrace with: ki_bash_backtrace "$?" "${_:-}" "${0:-}" "${LINENO:-}"
+function ki_bash_backtrace
+{
+    local LAST_EXIT_STATUS="$1"     # $?
+    local CMD="${2:-$BASH_COMMAND}" # $BASH_COMMAND
+    local LAST_ARG="${3:-$_}"       # $_ is ERR for 'exit 1'
+    local FILENAME="${4:-$0}"       # $0
+    local LINE="${5:-$LINENO}"      # $LINENO
+
+    trap - ERR EXIT
+
+    if [[ "$CMD" == "exit 0" ]]; then
+        exit 0
+    elif [[ "$LAST_ARG" == ERR ]] && [ "$LAST_EXIT_STATUS" -eq 0 ]; then
+        LAST_EXIT_STATUS=1 # for trap ERR
+    fi
+
+    echo
+    echo_status "Error" "Exception in ${FILENAME}:${LINE}, exit code=$LAST_EXIT_STATUS"
+    echo_status "Backtrace" "Last command : $(echo "$CMD" | head -n 3)"
+    local i=0
+    local C=
+    while C=$(caller "$i"); do
+        C=$(echo "$C" | sed -E 's/([0-9]+[ ]*)(.*$)/\2:\1/g') # put line number last
+        echo_status "  $i" "$C"
+        i=$((i+1))
+    done
+
+    exit "$LAST_EXIT_STATUS"
+}
+
+# Shows backtraces for unbound variables and unhandled non-0 exit code
+# commands, ex. (cmd || true), (cmd || RET=$?) ...
+# if 'set -o nounset', 'set -o errexit', 'set -o pipefail'
+trap 'trap - ERR && ki_bash_backtrace "$?" "${BASH_COMMAND:-}" "${_:-}" "${0:-}" "${LINENO:-}"' ERR EXIT
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+# ---------------------------------------------------------------------------
+
+# Older OSX doesn't have sed -r extended regex or -u unbuffer.
+SED_EXT_RE=$(echo a | sed -r '' &> /dev/null && printf "%s" "-r" || printf "%s" "-E")
+SED_UNBUFFER=$(echo a | sed -u '' &> /dev/null && printf "%s" "-u" || true)
+
+LOCAL_OS=linux
+if [[ "$(uname -s)" == *Darwin* ]] ; then
+    LOCAL_OS=darwin
+fi
+
+THIS_HOSTNAME=$(hostname)
+if [[ "$LOCAL_OS" == "darwin" ]]; then
+    HOST_IP=$({ ifconfig | grep "inet " | grep -v 127.0.0.1 | head -n 1 | awk '{print $2}'; } || echo 127.0.0.1)
+else
+    HOST_IP=$(ip -o route get 1 | awk '{print $7}' || echo 127.0.0.1)
+fi
+
+# ---------------------------------------------------------------------------
+# Defaults
+
+# configured by make-dist.sh
+SCRIPT_VERSION=7.2.0.0-20250314141507
+
+# The tag will be set to the version number from a local image or from dockerhub.
+DOCKER_IMAGE_REPO="${DOCKER_IMAGE_REPO:-kinetica/kinetica-cpu}" # kinetica-cpu is multiarch x86 and ARM
+DOCKER_IMAGE_TAG="latest"
+DOCKER_IMAGE="$DOCKER_IMAGE_REPO:$DOCKER_IMAGE_TAG"
+GPU_DOCKER_IMAGE_REPO="kinetica/kinetica-cuda" # for --gpu
+
+CONTAINER_NAME="kinetica"
+
+PERSIST_SUBDIR="kinetica-persist"
+HOST_PERSIST_DIRECTORY="$THIS_SCRIPT_DIR"
+DOCKER_PERSIST_DIRECTORY="/opt/gpudb/persist"
+DOCKER_HOST_NAME="$THIS_HOSTNAME"
+
+LISTEN_ADDRESS="0.0.0.0"
+GADMIN_PORT=8080
+REVEAL_PORT=8088
+DATABASE_PORT=9191
+HOSTMANAGER_PORT=9300
+POSTGRES_PORT=5434
+WORKBENCH_PORT=8000
+DOCKER_NETWORK=""
+DOCKER_PORTS=""
+
+KINETICA_USER=gpudb # $(whoami)
+KINETICA_USER_UID=$(id -u) # Note that if the caller is root the default ids are used.
+KINETICA_USER_GID=$(id -g)
+KINETICA_USER_UID_ARG=
+KINETICA_USER_GID_ARG=
+
+# How many previous versions in 'show-versions'
+KINETICA_SHOW_VERSIONS="${KINETICA_SHOW_VERSIONS:-24}"
+
+DOCKER_PROGRAM="${DOCKER_PROGRAM:-docker}"
+
+DOCKER_EXEC_ARGS="${DOCKER_EXEC_ARGS:-} --privileged"
+if [ -t 0 ] ; then
+    DOCKER_EXEC_ARGS+=" -it"
+fi
+
+DOCKER_RUN_ARGS="${DOCKER_RUN_ARGS:-}"
+#if [[ "$(uname -a)" != *86_64* ]]; then
+#    DOCKER_RUN_ARGS+=" --platform Linux/amd64" # Set platform for ARM and Apple M processors if using x86 image.
+#fi
+
+INSTALL_CONTAINER=0
+UPGRADE_CONTAINER=0
+START_CONTAINER=0
+STOP_CONTAINER=0
+KILL_CONTAINER=0
+RM_CONTAINER=0
+UNINSTALL_CONTAINER=0
+CLEAR_PERSIST=0
+STATUS_CONTAINER=0
+OPEN_WORKBENCH=0
+OPEN_GADMIN=0
+OPEN_REVEAL=0
+ALTER_PASSWORD=0
+ALTER_PASSWORD_USER="admin"
+SELF_TEST=0
+VERBOSE=0
+PERSIST_DIR_SPECIFIED=0
+VERSION_SPECIFIED=0
+GPUDB_CONF_UPDATES=()
+
+BIND_IP_DEV=""
+BIND_IP_ADDRESS="10.11.12.0"
+BIND_IP_ADDRESSES=()
+
+REGISTRY_TAGS=
+REGISTRY_LIST=
+
+# Return codes
+NOT_CREATED_RETURN_VALUE=2
+STOPPED_RETURN_VALUE=1
+
+CHECK_UPGRADE_NEWER_AVAILABLE=0
+CHECK_UPGRADE_USING_LATEST=1
+CHECK_UPGRADE_ERROR=2
+
+SPIN_STR="/-\|"
+
+RUN_RET=0
+RUN_CMDS=""
+RUN_ERROR_COUNT=0
+RUN_ERROR_STR=""
+
+# ---------------------------------------------------------------------------
+
+function show_help
+{
+    HELP_STR="
+This script can be used to install Kinetica to a single Docker container
+for educational use or developer testing.
+
+Basic usage is to run 'start' and 'open' to begin using Kinetica though the
+Workbench web browser user-interface. You will be asked to change the 'admin'
+user password after the first install, see 'alter-password' for more information.
+The default data directory is the directory of this script, be sure there is
+ample space. See the --persist option to specify an alternate path.
+The Kinetica DB and components inside the docker container can be reached
+through the addresses below from this host. The network device to listen to
+and ports can configured with the --listen-address and --*-port options.
+
+Workbench       : http://127.0.0.1:$WORKBENCH_PORT/workbench
+Kinetica admin  : http://127.0.0.1:$GADMIN_PORT/gadmin
+Reveal UI       : http://127.0.0.1:$REVEAL_PORT
+Database REST   : http://127.0.0.1:$DATABASE_PORT
+Postgres wire   : http://127.0.0.1:$POSTGRES_PORT
+
+Documentation   : https://www.kinetica.com/docs
+License         : https://www.kinetica.com/agreements/license-agreement-trial-edition
+Copyright       : Kinetica Inc. (2025)
+Installer       : $SCRIPT_VERSION
+
+Usage           : kinetica_docker.sh COMMAND [OPTIONS]
+
+Starting, Installing, and Upgrading:
+
+ start          : Start the Kinetica system, installing and running the Docker
+                  container as necessary. 
+ restart        : Start or restart the Kinetica system, installing and running
+                  the Docker container as necessary.
+ install        : Install and initially configure the Kinetica Docker
+                  container if not already installed.
+                  Note that the Docker image will be downloaded, if necessary,
+                  which may take some time depending on the network bandwidth.
+ upgrade        : Update the installed Kinetica container to the latest version
+                  or specified --version version. No-op if running latest.
+                  The new container will be downloaded, which may take some time,
+                  then the database and the container will be stopped and
+                  restarted to perform the upgrade. 
+
+Stopping and Uninstalling:
+
+ stop           : Stop Kinetica and the Docker container gracefully.
+ kill           : Terminate the Kinetica Docker container immediately.
+                  Note that unflushed tables will be rebuilt on restart.
+ rm             : Terminate and remove the Docker container.
+ uninstall      : Terminate and remove both the Docker container and all
+                  $DOCKER_IMAGE_REPO images.
+                  Combine with 'clear' to erase the data as well.
+                  Note that a reinstall will download the image as needed.
+
+ clear          : Clear data in the persist directory of a created instance,
+                  the path specified by the --persist arg, or the
+                  default persist directory if not specified or created.
+                  Kinetica will be terminated if running and left stopped.
+
+Status and Tools:
+
+ open           : Open the default browser to Kinetica's Workbench tool.
+ open-workbench : Workbench is a sophisticated SQL notebook interface to the
+                  database. Example workbooks are provided that demonstrate
+                  Kinetica's features.
+ open-gadmin    : GAdmin is a Web UI that allows browsing tables, running API
+                  and SQL commands, viewing status, and more...
+ open-reveal    : Reveal is a rich dashboard builder to visualize your data
+                  though clickable plots, tables, and maps.
+
+ status         : Show information about the state of the Kinetica system.
+
+ alter-password : Reads new 'admin' user password from environment variable
+                  KINETICA_ADMIN_PASSWORD, from stdin, or prompts for input if tty.
+ check-upgrade  : Check if there is a newer version to install.
+                  Exit code 0 if newer available or not installed, 
+                  1 if latest is installed.
+ show-versions  : Display the available Kinetica versions to install.
+
+Options for Start, Restart, Install, and Upgrade:
+
+ --gpu                : Use the GPU docker image repo '$GPU_DOCKER_IMAGE_REPO'
+                        and docker --runtime=nvidia.
+                        Must have a working Nvidia GPU driver with 'nvidia-smi' exe,
+                        and the nvidia docker extension 'nvidia-container-toolkit' exe.
+                        Note that the kinetica-gpu script is the same as the cpu script, but
+                        sets this arg permanently.
+
+ -p --persist PATH    : Path on the host to store database files.
+                        Default is in the directory of this script.
+                        $HOST_PERSIST_DIRECTORY
+ --version VERSION    : Name of the Kinetica version to install.
+                        Default is '$DOCKER_IMAGE_TAG'.
+
+ --database-port PORT : Specify the host port to map to the Kinetica's
+                        DB REST HTTP server for SQL and API connections.
+                        Default: $DATABASE_PORT
+ --postgres-port PORT : Specify the host port to map to Kinetica's
+                        Postgres wireline compatible server.
+                        Default: $POSTGRES_PORT
+ --gadmin-port PORT   : Specify the host port to use Kinetica's
+                        GAdmin web UI tool. Default: $GADMIN_PORT
+ --reveal-port PORT   : Specify the host port to use Kinetica's
+                        Reveal data-visualization tool. Default: $REVEAL_PORT
+ --workbench-port PORT: Specify the host port to use Kinetica's
+                        Workbench data-exploration tool. Default: $WORKBENCH_PORT
+ --listen-address IP  : IP address of the network interface to listen on.
+                        A listen address of 127.0.0.1 will only allow network requests
+                        originating from the localhost for security.
+                        In order to allow connections to Kinetica from others hosts
+                        either listen to a specific device at the IPV4 address
+                        or 0.0.0.0 to listen to all network devices on this host.
+                        Default: $LISTEN_ADDRESS, found device: $HOST_IP
+ --uid NUMBER           Set the user id for the '$KINETICA_USER!' user, Default: $KINETICA_USER_UID
+ --gid NUMBER           Set the user's group id for the '$KINETICA_USER' user, Default: $KINETICA_USER_GID
+
+ --conf 'key=value'     Change a parameter in the gpudb.conf.
+                        This parameter may be used multiple times.
+Other Options:
+
+ help -h --help       : Show this help
+ -v --verbose         : Show commands as they are run.
+
+Examples:
+
+# Start Kinetica, specifying the data directory, and open the tools.
+./kinetica_docker.sh start open --persist /home/user/kinetica
+
+# Uninstall and remove data in the default or installed container persist dir.
+./kinetica_docker.sh clear uninstall
+"
+
+    echo "$HELP_STR"
+}
+
+# ---------------------------------------------------------------------------
+# Functions
+
+SED_REMOVE_PIDS="s/([ 0-9]*)//g"
+
+# ---------------------------------------------------------------------------
+# The 'sleep' program doesn't propagate CTRL-C so this script may be terminated,
+# but the function calling sleep continues...  Only when stdin (0) is a tty,
+# otherwise the read command immediately fails, causing no "sleeping" to happen.
+
+if [ -t 0 ]; then
+    function sleep
+    {
+        local TIMEOUT="$1"
+        local RET=0
+        # '-N 1000000' so keypresses don't interrupt, just CTRL-C
+        # '-s' eats keystrokes, but can break the terminal after CTRL-C, user must 'reset'
+        read -r -t "$TIMEOUT" -n 1000000 || RET=$?
+
+        if [ $RET -eq 130 ]; then
+            exit_func 1 # Ctrl-C caught (128+2)
+        fi
+
+        return 0 # read timeout returns 142 (man page says > 128), return success
+    }
+fi
+
+# For --bind-host-ips to bind before --run and unbind after --kill/--rm, checks if enabled.
+function bind_host_ips
+{
+    local BIND="$1"  # "bind" or "unbind"
+
+    if [ -z "$BIND_IP_DEV" ]; then
+        return 0
+    fi
+
+    for c in $(seq 0 $((TOTAL_NUM_CONTAINERS-1))); do
+        local BIND_IP="${BIND_IP_ADDRESSES[$c]}"
+        if [[ "a$BIND" == "abind" ]]; then
+            if ! ip addr show dev "$BIND_IP_DEV" | grep "$BIND_IP" > /dev/null; then
+                echo "Binding IP:${BIND_IP}/20 to dev $BIND_IP_DEV"
+                sudo ip addr add "${BIND_IP}/20" dev "$BIND_IP_DEV"
+            fi
+        else
+            if ip addr show dev "$BIND_IP_DEV" | grep "${BIND_IP}" > /dev/null; then
+                echo "Unbinding IP:${BIND_IP}/20 from dev $BIND_IP_DEV"
+                sudo ip addr del "${BIND_IP}/20" dev "$BIND_IP_DEV"
+            fi
+        fi
+    done
+}
+
+function check_docker
+{
+    if ! which "$DOCKER_PROGRAM" > /dev/null; then
+        echo_status "Error" "Docker executable '$DOCKER_PROGRAM' is not installed."
+        echo_status ""      "Please install Docker."
+        if [[ "$LOCAL_OS" == "darwin" ]]; then
+            echo_status "" "For more information see https://docs.docker.com/docker-for-mac/install/"
+        else
+            echo_status "" "For more information see https://docs.docker.com/engine/install/"
+        fi
+        exit_func 1
+    fi
+
+    local P=
+    if ! P=$(docker ps 2>&1); then
+        echo "$P"
+        echo
+        echo_status "Error" "Docker service is not running or accessible."
+        if [[ "$LOCAL_OS" == "darwin" ]]; then
+            echo_status "" "Please start Docker."
+            echo_status "" "For more information see https://docs.docker.com/docker-for-mac/install/"
+        else
+            echo_status "" "Please start Docker and check user permissions."
+            echo_status "" "For more information see https://docs.docker.com/engine/install/"
+        fi
+        exit_func 1
+    fi
+
+    return 0
+}
+
+function has_image
+{
+    local R=
+    if ! R=$($DOCKER_PROGRAM images -q "$DOCKER_IMAGE" 2> /dev/null) || [ -z "$R" ]; then
+        return 1
+    fi
+    return 0
+}
+
+CURRENT_DOCKER_IMAGE=""
+KINETICA_VERSION=""
+CURRENT_CONTAINER_ID=""
+function is_created
+{
+    CURRENT_DOCKER_IMAGE=""
+    KINETICA_VERSION=""
+    CURRENT_CONTAINER_ID=""
+
+    local R=
+    # Note: Older docker 1.13 doesn't support regex in --filter
+    if ! R=$($DOCKER_PROGRAM ps -a --format '{{ .Names }}' --filter "name=$CONTAINER_NAME" 2> /dev/null | grep -o "^$CONTAINER_NAME$") || [ -z "$R" ]; then
+        return 1
+    fi
+
+    CURRENT_DOCKER_IMAGE=$($DOCKER_PROGRAM inspect "$CONTAINER_NAME" --format '{{.Config.Image}}' 2> /dev/null)
+    KINETICA_VERSION=$(echo "$CURRENT_DOCKER_IMAGE" | sed 's/^[^:]*://g')
+    local ID=$($DOCKER_PROGRAM inspect --format '{{.Id}}' "$CONTAINER_NAME" 2> /dev/null)
+    CURRENT_CONTAINER_ID=$(echo "$ID" | head -c 12)
+
+    get_container_labels
+
+    return 0
+}
+
+function is_container_running
+{
+    if ! is_created ; then
+        return 1
+    fi
+
+    local STATE_RUNNING=
+    if ! STATE_RUNNING=$($DOCKER_PROGRAM inspect --format '{{.State.Running}}' "$CONTAINER_NAME" 2> /dev/null) || \
+       [[ "a${STATE_RUNNING}" != "atrue" ]]; then
+        return 1
+    fi
+}
+
+function is_installed
+{
+    if ! is_created; then
+        return 1
+    fi
+
+    if [ ! -f "$INSTALL_INFO_FILE" ]; then
+        return 1
+    fi
+
+    local INSTALL_HASH_LAST=
+    if ! INSTALL_HASH_LAST=$(grep INSTALL_HASH= "$INSTALL_INFO_FILE") || \
+       [[ "INSTALL_HASH=$INSTALL_HASH" != "$INSTALL_HASH_LAST" ]]; then
+        return 1
+    fi
+}
+
+function is_running
+{
+    local RUNNING_ARGS="${1:-}"
+
+    if ! is_container_running ; then
+        return 1
+    fi
+
+    if [ -n "$RUNNING_ARGS" ]; then
+        if ! $DOCKER_PROGRAM exec "$CONTAINER_NAME" su "$ENV_KINETICA_USER" -c "/opt/gpudb/core/bin/gpudb $RUNNING_ARGS" &> /dev/null ; then
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
+LABEL_STR="" # key=value list of all the labels.
+INSTALL_HASH=""
+LABEL_IMAGE="$DOCKER_IMAGE"
+LABEL_HOSTNAME="$DOCKER_HOST_NAME"
+LABEL_PERSIST_DIR="$HOST_PERSIST_DIRECTORY"
+LABEL_LISTEN_ADDRESS="$LISTEN_ADDRESS"
+LABEL_GADMIN_PORT="$GADMIN_PORT"
+LABEL_REVEAL_PORT="$REVEAL_PORT"
+LABEL_DATABASE_PORT="$DATABASE_PORT"
+LABEL_HOSTMANAGER_PORT="$HOSTMANAGER_PORT"
+LABEL_POSTGRES_PORT="$POSTGRES_PORT"
+LABEL_WORKBENCH_PORT="$WORKBENCH_PORT"
+ENV_KINETICA_USER="$KINETICA_USER"
+ENV_KINETICA_USER_UID="$KINETICA_USER_UID"
+ENV_KINETICA_USER_GID="$KINETICA_USER_GID"
+
+function get_container_labels
+{
+    local SET_DEFAULTS="${1:-}"
+    function get_one_label
+    {
+        local V=$(echo "$L" | grep "$1[ \t\",:=]" | sed $SED_EXT_RE 's/^[^:=]*[:=][ \t]*["]*([^"]*)",/\1/g')
+        LABEL_STR+="$1=$V
+"
+        eval "$2"="'$V'"
+        if [[ "$SET_DEFAULTS" == "set-defaults" ]] ; then eval "$3"="'$V'"; fi
+    }
+
+    LABEL_STR=""
+    INSTALL_HASH=
+    local L=
+    if L=$($DOCKER_PROGRAM inspect "$CONTAINER_NAME" 2> /dev/null); then
+        get_one_label com.kinetica.image             LABEL_IMAGE            DOCKER_IMAGE
+        get_one_label com.kinetica.persist_directory LABEL_PERSIST_DIR      HOST_PERSIST_DIRECTORY
+        get_one_label com.kinetica.hostname          LABEL_HOSTNAME         DOCKER_HOST_NAME
+        get_one_label com.kinetica.listen_address    LABEL_LISTEN_ADDRESS   LISTEN_ADDRESS
+        get_one_label com.kinetica.gadmin_port       LABEL_GADMIN_PORT      GADMIN_PORT
+        get_one_label com.kinetica.reveal_port       LABEL_REVEAL_PORT      REVEAL_PORT
+        get_one_label com.kinetica.database_port     LABEL_DATABASE_PORT    DATABASE_PORT
+        get_one_label com.kinetica.hostmanager_port  LABEL_HOSTMANAGER_PORT HOSTMANAGER_PORT
+        get_one_label com.kinetica.postgres_port     LABEL_POSTGRES_PORT    POSTGRES_PORT
+        get_one_label com.kinetica.workbench_port    LABEL_WORKBENCH_PORT   WORKBENCH_PORT
+        get_one_label KINETICA_USER                  ENV_KINETICA_USER      KINETICA_USER
+        get_one_label KINETICA_USER_UID              ENV_KINETICA_USER_UID  KINETICA_USER_UID
+        get_one_label KINETICA_USER_GID              ENV_KINETICA_USER_GID  KINETICA_USER_GID
+
+        INSTALL_HASH=$($DOCKER_PROGRAM inspect --format '{{.Name}} {{.Id}} {{.Created}}' "$CONTAINER_NAME" || true)
+    fi
+}
+
+function stop_container
+{
+    local RET=0
+
+    if ! is_running; then
+        echo_status "Stop" "Ok"
+        return 0
+    fi
+
+    printf "%-${ECHO_STATUS_WIDTH}s :  " "Stop"
+
+    ( run_quiet LF $DOCKER_PROGRAM exec "$CONTAINER_NAME" su "$ENV_KINETICA_USER" -c "/opt/gpudb/core/bin/gpudb stop" | sed $SED_UNBUFFER "$SED_REMOVE_PIDS" && \
+      run_quiet $DOCKER_PROGRAM stop "$CONTAINER_NAME" ) &
+    local STOP_PID=$!
+    local i=0
+    while kill -0 "$STOP_PID" &> /dev/null ; do
+        sleep 1
+        if [ "$VERBOSE" -ne 0 ]; then
+            continue
+        elif [ -t 1 ]; then
+            printf "\b%s" "${SPIN_STR:i++%${#SPIN_STR}:1}"
+        else
+            printf '.'
+        fi
+    done
+    [ "$VERBOSE" -eq 0 ] && [ -t 1 ] && printf "\b"
+
+    if is_running; then
+        echo
+        echo_status "Error" "Unable to stop '$CONTAINER_NAME'"
+        return 1
+    fi
+    sleep 2 # seems to need it
+
+    printf "Ok\n"
+    run_quiet echo_status "Stop" "Ok"
+}
+
+function kill_container
+{
+    local RET=0
+
+    if is_running; then
+        echo_status "Killing" "$CURRENT_DOCKER_IMAGE in container '$CONTAINER_NAME'"
+
+        if ! run_quiet $DOCKER_PROGRAM kill "$CONTAINER_NAME"; then
+            echo_status "Error" "Unable to kill '$CONTAINER_NAME"
+            return 1
+        fi
+        sleep 2 # seems to need it
+    fi
+
+    echo_status "Kill" "Ok"
+}
+
+function rm_container
+{
+    local RET=0
+
+    if is_created ; then
+        echo_status "Removing" "$CURRENT_DOCKER_IMAGE"
+
+        if ! run_quiet $DOCKER_PROGRAM rm "$CONTAINER_NAME"; then
+            echo_status "Error" "Unable to remove '$CONTAINER_NAME'"
+            return 1
+        fi
+        sleep 2 # seems to need it
+    fi
+
+    echo_status "Remove" "Ok"
+}
+
+function uninstall_container
+{
+    local RET=0
+
+    # First delete specified image, then others
+    if has_image ; then
+        echo_status "Removing" "$DOCKER_IMAGE"
+
+        if ! run_quiet $DOCKER_PROGRAM rmi "$DOCKER_IMAGE"; then
+            echo_status "Error" "Unable to remove image '$DOCKER_IMAGE'"
+            return 1
+        fi
+    fi
+
+    local ALL_IMAGES=""
+    ALL_IMAGES=$($DOCKER_PROGRAM images -a "$DOCKER_IMAGE_REPO")
+
+    if [ "$VERSION_SPECIFIED" -eq 0 ] && echo "$ALL_IMAGES" | grep -q "$DOCKER_IMAGE_REPO" ; then
+        echo_status "Removing" "$DOCKER_IMAGE_REPO"
+        echo "$ALL_IMAGES"
+
+        # Delete by name rather than id to avoid "unable to delete ... image is referenced in multiple repositories"
+        while IFS= read -r line ; do
+            local RMI_NAME_TAG=$(echo "$line" | awk '{print $1":"$2}')
+            run_quiet $DOCKER_PROGRAM rmi "$RMI_NAME_TAG" || RET=$(( RET + $? ))
+        done <<< "$(echo "$ALL_IMAGES" | grep "$DOCKER_IMAGE_REPO")"
+    fi
+
+    if [ "$RET" -eq 0 ] ; then
+        echo_status "Uninstall" "Ok"
+    else
+        echo_status "Error" "Removing all docker images"
+    fi
+}
+
+function clear_persist
+{
+    # Only delete PERSIST_SUBDIR to clear persist.
+
+    if [ -z "$PERSIST_SUBDIR" ]; then
+        echo "ERROR: Internal variable PERSIST_SUBDIR cannot be empty" 
+        exit_func 1
+    fi
+
+    if [ ! -d "$HOST_PERSIST_DIRECTORY/$PERSIST_SUBDIR" ]; then
+        echo_status "Clear" "Empty $HOST_PERSIST_DIRECTORY"
+        return 0
+    fi
+
+    echo_status "Clear" "Deleting $HOST_PERSIST_DIRECTORY/$PERSIST_SUBDIR"
+
+    run_quiet rm -Rf "$HOST_PERSIST_DIRECTORY/$PERSIST_SUBDIR"
+
+    if [ -d "$HOST_PERSIST_DIRECTORY/$PERSIST_SUBDIR" ]; then
+        echo_status "Error" "Unable to delete $HOST_PERSIST_DIRECTORY/$PERSIST_SUBDIR directory"
+        return 1
+    fi
+
+    echo_status "Clear" "Ok"
+}
+
+function check_persist_writable
+{
+    local DIR_="$1"
+    local CREATE="${2:-}"
+
+    if [ -z "$DIR_" ]; then
+        echo_status "Error" "Empty persist directory, please specify a writable directory."
+        return 1
+    fi
+
+    DIR_=$(readlinkf "$DIR_")
+    if [ "$VERBOSE" -gt 0 ]; then echo_status "Checking" "$DIR_"; fi
+
+    if [[ "a$DIR_" == "a/" ]]; then
+        echo_status "Error" "The root / directory is not a valid persist, please specify a writable directory."
+        return 1
+    fi
+
+    if [[ "a$CREATE" == "aCREATE" ]] && [ ! -d "$DIR_" ]; then
+        if ! run_quiet mkdir -p "$DIR_"; then
+            echo_status "Error" "Unable to create persist '$DIR_', please specify a writable directory."
+            return 1
+        fi
+    fi
+
+    if [ ! -d "$DIR_" ]; then
+        echo_status "Error" "Missing persist directory '$DIR_', please specify a writable directory."
+        return 1
+    fi
+
+    local TEST_FILE="$DIR_/${THIS_SCRIPT_NAME}_test_file"
+    if ! touch "$TEST_FILE" &> /dev/null; then
+        echo_status "Error" "Unable to write to persist directory '$DIR_', please specify a writable directory."
+        return 1
+    fi
+
+    \rm -f "$TEST_FILE"
+}
+
+function install_container
+{
+    # "check_update,no_update_conf"
+    local OPTIONS="${1:-}"
+    local RET=0
+
+    bind_host_ips bind
+
+    # Mount one level deeper to better contain it
+    local PERSIST_DIRECTORY="$HOST_PERSIST_DIRECTORY/$PERSIST_SUBDIR"
+    local RESET_PW="$ALTER_PASSWORD"
+
+    local HOST_USER_ID=$(id -u)
+    local HOST_GROUP_ID=$(id -g)
+
+    # If caller is root, then don't set these env vars just run as regular gpudb user
+    # in the container unless set by --uid --gid args
+    if [ "$HOST_USER_ID" -eq 0 ] && [ -z "$KINETICA_USER_UID_ARG" ]; then
+        KINETICA_USER_UID=
+    fi
+    if [ "$HOST_GROUP_ID" -eq 0 ] && [ -z "$KINETICA_USER_GID_ARG" ]; then
+        KINETICA_USER_GID=
+    fi
+
+    if [ ! -d "$PERSIST_DIRECTORY" ]; then
+        RESET_PW=1
+        if ! run_quiet mkdir -p "$PERSIST_DIRECTORY" ; then
+            echo_status "Error" "Unable to create persist directory: $PERSIST_DIRECTORY"
+            exit_func 1
+        fi
+        run_quiet echo_status "Created" "$PERSIST_DIRECTORY"
+    fi
+
+    if ! check_persist_writable "$PERSIST_DIRECTORY" CREATE ; then
+        exit_func 1
+    fi
+
+    if is_created ; then
+        get_container_labels
+
+        local CHANGED_PARAMS=0
+        function changed_param { 
+            if [[ "$1" != "$2" ]]; then
+                echo_status "$3 changed" "$1 -> $2"
+                CHANGED_PARAMS=$((CHANGED_PARAMS+1))
+            fi 
+        }
+
+        changed_param "$LABEL_IMAGE"            "$DOCKER_IMAGE"           "Image"
+        changed_param "$LABEL_PERSIST_DIR"      "$HOST_PERSIST_DIRECTORY" "Persist dir"
+        changed_param "$LABEL_HOSTNAME"         "$DOCKER_HOST_NAME"       "Hostname"
+        changed_param "$LABEL_LISTEN_ADDRESS"   "$LISTEN_ADDRESS"         "Listen addr"
+        changed_param "$LABEL_GADMIN_PORT"      "$GADMIN_PORT"            "GAdmin port"
+        changed_param "$LABEL_REVEAL_PORT"      "$REVEAL_PORT"            "Reveal port"
+        changed_param "$LABEL_DATABASE_PORT"    "$DATABASE_PORT"          "DB port"
+        changed_param "$LABEL_HOSTMANAGER_PORT" "$HOSTMANAGER_PORT"       "Hostmanager port"
+        changed_param "$LABEL_POSTGRES_PORT"    "$POSTGRES_PORT"          "Postgres port"
+        changed_param "$LABEL_WORKBENCH_PORT"   "$WORKBENCH_PORT"         "Workbench port"
+        changed_param "$ENV_KINETICA_USER"      "$KINETICA_USER"          "User"
+        changed_param "$ENV_KINETICA_USER_UID"  "$KINETICA_USER_UID"      "User id (uid)"
+        changed_param "$ENV_KINETICA_USER_GID"  "$KINETICA_USER_GID"      "User group (gid)"
+
+        if is_installed && [ "$CHANGED_PARAMS" -eq 0 ]; then
+            run_quiet echo_status "Install" "Ok"
+            return 0
+        fi
+
+        if [ "$CHANGED_PARAMS" -ne 0 ]; then
+            echo_status "Restarting" "$CHANGED_PARAMS parameters have changed"
+        fi
+        run stop_container || exit_func $?
+        run rm_container || exit_func $?
+    fi
+
+    # Find and specify the version version tag not ":latest" to clarify version to user
+    if { [[ "a$OPTIONS" == *"check_update"* ]] && [ "$VERSION_SPECIFIED" -eq 0 ]; } || \
+       [[ "$DOCKER_IMAGE_TAG" == "latest" ]] ; then
+        is_running
+        get_registry_tags
+
+        DOCKER_IMAGE_TAG="$LATEST_REGISTRY_TAG_VERSION"
+        DOCKER_IMAGE="$LATEST_DOCKER_IMAGE"
+        echo_status "Image" "$DOCKER_IMAGE"
+    fi
+
+    echo_status "Data"    "$PERSIST_DIRECTORY"
+    echo_status "Install" "$DOCKER_IMAGE"
+
+    if ! has_image ; then
+        echo_status "Downloading" "Docker image, this may take some time."
+    fi
+
+    local MIN_DOCKER_IMAGE_TAG="7.1.3.0.20210219180351"
+    if [ ! "$(printf '%s\n%s' "$DOCKER_IMAGE_TAG" "$MIN_DOCKER_IMAGE_TAG" | sort -V | head -n1)" = "$MIN_DOCKER_IMAGE_TAG" ]; then
+
+        echo_status "Error" "Kinetica docker image version is too old: $DOCKER_IMAGE_TAG, minimum is $MIN_DOCKER_IMAGE_TAG"
+        exit 1
+
+    else # use this id change
+
+    # -----------------------------------------------------------------------
+    # First start the container running bash, then update user/group ids,
+    # then run the docker start cmd with the correct ids. 
+
+    local CMD_=( $DOCKER_PROGRAM run -d \
+                -l "com.kinetica.image=$DOCKER_IMAGE" \
+                -l "com.kinetica.persist_directory=$HOST_PERSIST_DIRECTORY" \
+                -l "com.kinetica.hostname=$DOCKER_HOST_NAME" \
+                -l "com.kinetica.run_args=$DOCKER_RUN_ARGS" \
+                -l "com.kinetica.listen_address=$LISTEN_ADDRESS" \
+                -l "com.kinetica.gadmin_port=$GADMIN_PORT" \
+                -l "com.kinetica.reveal_port=$REVEAL_PORT" \
+                -l "com.kinetica.database_port=$DATABASE_PORT" \
+                -l "com.kinetica.hostmanager_port=$HOSTMANAGER_PORT" \
+                -l "com.kinetica.postgres_port=$POSTGRES_PORT" \
+                -l "com.kinetica.workbench_port=$WORKBENCH_PORT" \
+                -e "KINETICA_USER=$KINETICA_USER" \
+                -e "KINETICA_USER_UID=$KINETICA_USER_UID" \
+                -e "KINETICA_USER_GID=$KINETICA_USER_GID" \
+                -e "KINETICA_DEBUG=$VERBOSE" \
+                $DOCKER_EXEC_ARGS ${DOCKER_RUN_ARGS} \
+                --hostname "$DOCKER_HOST_NAME" \
+                --name "$CONTAINER_NAME" \
+                -v "$PERSIST_DIRECTORY:$DOCKER_PERSIST_DIRECTORY" \
+                $DOCKER_NETWORK $DOCKER_PORTS "$DOCKER_IMAGE" tail -f /opt/gpudb/core/bin/gpudb )
+
+    if ! has_image ; then
+        if [ "$VERBOSE" -gt 0 ]; then
+            echo_status "Debug" "\$ ${CMD_[*]}"
+        fi
+        # Run without stdout capture to show download progress, using eval for quotes.
+        eval "${CMD_[@]}" || RET=$?
+        echo
+    else
+        run_quiet eval "${CMD_[@]}" || RET=$?
+    fi
+    if [ "$RET" -ne 0 ]; then
+        echo_status "Error" "Unable to install and run Docker container: '$CONTAINER_NAME'"
+        exit_func 1
+    fi
+
+    # -----------------------------------------------------------------------
+    # Change 'gpudb' user in container to be the user running this script
+    # to handle persist file permissions
+
+    local GPUDB_USER_ID=$($DOCKER_PROGRAM exec "$CONTAINER_NAME" id -u gpudb)
+    local GPUDB_GROUP_ID=$($DOCKER_PROGRAM exec "$CONTAINER_NAME" id -g gpudb)
+    local GPUDB_PROC_USER_ID=$($DOCKER_PROGRAM exec "$CONTAINER_NAME" id -u gpudb_proc)
+    local GPUDB_PROC_GROUP_ID=$($DOCKER_PROGRAM exec "$CONTAINER_NAME" id -g gpudb_proc)
+
+    # If these env vars aren't set in the container the gpudb user has default ids.
+    if [ -z "$KINETICA_USER_UID" ] ; then
+        KINETICA_USER_UID="$GPUDB_USER_ID"
+        HOST_USER_ID="$GPUDB_USER_ID"
+    fi
+    if [ -z "$KINETICA_USER_GID" ] ; then
+        KINETICA_USER_GID="$GPUDB_GROUP_ID"
+        HOST_GROUP_ID="$GPUDB_GROUP_ID"
+    fi
+
+    # Move gpudb_proc user out of the way if using same id.
+    local NEW_GPUDB_PROC_USER_ID="$GPUDB_PROC_USER_ID"
+    if [ "$HOST_USER_ID" -eq "$GPUDB_PROC_USER_ID" ]; then
+        NEW_GPUDB_PROC_USER_ID=$(( HOST_USER_ID + 1 ))
+    fi
+    local NEW_GPUDB_PROC_GROUP_ID="$GPUDB_PROC_GROUP_ID"
+    if [ "$HOST_GROUP_ID" -eq "$GPUDB_PROC_GROUP_ID" ]; then
+        NEW_GPUDB_PROC_GROUP_ID=$(( HOST_GROUP_ID + 1 ))
+    fi
+
+    if [ "$VERBOSE" -gt 0 ]; then
+        echo_status "Debug" "host       uid:gid $HOST_USER_ID:$HOST_GROUP_ID"
+        echo_status "Debug" "gpudb      uid:gid $GPUDB_USER_ID:$GPUDB_GROUP_ID"
+        echo_status "Debug" "gpudb_proc uid:gid $GPUDB_PROC_USER_ID:$GPUDB_PROC_GROUP_ID > $NEW_GPUDB_PROC_USER_ID:$NEW_GPUDB_PROC_GROUP_ID"
+    fi
+
+    # Do user:group separately and "xargs -P 4 -n 40" runs in parallel
+    local FIX_PERMISSION_SCRIPT="#! /usr/bin/env bash
+
+    if [ -n \"\$KINETICA_DEBUG\" ] && [ \"\$KINETICA_DEBUG\" -gt 2 ]; then
+        set -x
+    fi
+    if [ -f /opt/gpudb/fixed_permissions ]; then
+        exit 0
+    fi
+
+    GPUDB_PROC_HOME=\$(echo ~gpudb_proc)
+    GPUDB_HOME=\$(echo ~gpudb)
+    echo \"home \$GPUDB_PROC_HOME \$GPUDB_HOME\"
+
+    function update_files 
+    {
+        local S=\$SECONDS
+        (set +x; find \$1 -print0 | sort -zu | xargs -0 --no-run-if-empty -P 8 -n 200 \$2)
+        echo \"find \$1 \$2 in \$(( \$SECONDS - \$S ))s, elapsed \${SECONDS}s\"
+    }
+
+    if [ $NEW_GPUDB_PROC_USER_ID -ne $GPUDB_PROC_USER_ID ] || \
+       [ $NEW_GPUDB_PROC_GROUP_ID -ne $GPUDB_PROC_GROUP_ID ] ; then
+        mkdir -p /home/gpudb_proc
+        chown gpudb_proc:gpudb_proc /home/gpudb_proc
+        usermod -d /home/gpudb_proc gpudb_proc
+        groupmod -o -g $NEW_GPUDB_PROC_GROUP_ID gpudb_proc
+        usermod -o -u $NEW_GPUDB_PROC_USER_ID -g $NEW_GPUDB_PROC_GROUP_ID gpudb_proc
+        echo usermod gpudb_proc \$SECONDS
+
+        update_files \"/opt/gpudb /tmp -not ( -path /opt/gpudb/persist ) -user $GPUDB_PROC_USER_ID\" \"chown -h gpudb_proc\" &
+        update_files \"/opt/gpudb /tmp -not ( -path /opt/gpudb/persist ) -group $GPUDB_PROC_GROUP_ID\" \"chgrp -h gpudb_proc\" &
+    fi
+
+    if [ $HOST_USER_ID -ne $GPUDB_USER_ID ] || \
+       [ $HOST_GROUP_ID -ne $GPUDB_GROUP_ID ] ; then
+        mkdir -p /home/gpudb
+        chown gpudb:gpudb /home/gpudb
+        usermod -d /home/gpudb gpudb
+        groupmod -o -g $HOST_GROUP_ID gpudb
+        usermod -o -u $HOST_USER_ID -g $HOST_GROUP_ID gpudb
+        echo usermod gpudb \$SECONDS
+
+        getent group $GPUDB_GROUP_ID >/dev/null || groupadd --gid $GPUDB_GROUP_ID -o gpudb_
+        getent passwd $GPUDB_USER_ID >/dev/null || useradd --uid $GPUDB_USER_ID -g $GPUDB_GROUP_ID -M -r -d /home/gpudb_ -s /bin/bash -c \"Kinetica user\" gpudb_
+        usermod -a -G gpudb_ gpudb
+        usermod -a -G gpudb gpudb_
+
+        update_files \"/opt/gpudb -not ( -path /opt/gpudb/persist ) -type d -user $GPUDB_USER_ID\" \"chown -h gpudb\" &
+        update_files \"/opt/gpudb/persist \! -user $GPUDB_USER_ID\" \"chown -h gpudb\" &
+        update_files \"/tmp -user $GPUDB_USER_ID\" \"chown -h gpudb\" &
+
+        update_files \"/opt/gpudb -not ( -path /opt/gpudb/persist ) -type d -group $GPUDB_GROUP_ID\" \"chgrp -h gpudb\" &
+        update_files \"/opt/gpudb/persist \! -group $GPUDB_GROUP_ID\" \"chgrp -h gpudb\" &
+        update_files \"/tmp -group $GPUDB_GROUP_ID\" \"chgrp -h gpudb\" &
+
+        UDIRS=\"\$(find /opt/gpudb -maxdepth 3 -not \( -path /opt/gpudb/persist \) -type d -name etc -o -name logs -o -name tmp -o -name var)\"
+        UDIRS+=' /opt/gpudb/core'
+        UDIRS+=' /opt/gpudb/connectors/reveal/lib/python*/site-packages/caravel/config.py /opt/gpudb/connectors/reveal/lib/python*/site-packages/caravel/static/assets'
+        #UDIRS+=' /opt/gpudb/connectors/reveal/tmp /opt/gpudb/connectors/reveal/var'
+        UDIRS+=' /opt/gpudb/sql'
+        UDIRS+=' /opt/gpudb/stats/gpudb-stats.sh /opt/gpudb/stats/grafana/data'
+        UDIRS+=' /opt/gpudb/stats/grafana/public/gpudb_cluster_info*.js'
+        UDIRS+=' /opt/gpudb/stats/loki /opt/gpudb/stats/storage'
+        UDIRS+=' /opt/gpudb/supervisor/conf' # /opt/gpudb/supervisor/var
+        UDIRS+=' /opt/gpudb/tomcat/webapps/gadmin' # /gadmin/gpudb_cluster_info.js
+        #UDIRS+=' /opt/gpudb/tomcat/webapps/gadmin/reports'
+        #UDIRS+=' /opt/gpudb/tomcat/webapps/gadmin/WEB-INF/classes'
+        UDIRS+=' /opt/gpudb/tomcat/work'  # /Catalina/HOST/gadmin
+        UDIRS+=' /opt/gpudb/udf'
+        UDIRS+=' /opt/gpudb/workbench/cli/src/config /opt/gpudb/workbench/client/build/config_production.js /opt/gpudb/workbench/client/public'
+        UDIRS+=' /opt/gpudb/workbench/server/data /opt/gpudb/workbench/server/package.json /opt/gpudb/workbench/kinetica-workbench'
+
+        update_files \"\$UDIRS ( -type f -or -type l ) -and -user $GPUDB_USER_ID\" \"chown -h gpudb\" &
+        update_files \"\$UDIRS ( -type f -or -type l ) -and -group $GPUDB_GROUP_ID\" \"chgrp -h gpudb\" &
+    fi
+
+    [ -d /opt/gpudb/persist/gpudb ] || { mkdir /opt/gpudb/persist/gpudb && chown gpudb:gpudb /opt/gpudb/persist/gpudb; }
+
+    wait
+ 
+    touch /opt/gpudb/fixed_permissions
+    echo \"user mapping complete in \$SECONDS\"
+    "
+
+    local FIX_PERMISSION_SCRIPT2="#! /usr/bin/env bash
+
+    if [ -n \"\$KINETICA_DEBUG\" ] && [ \"\$KINETICA_DEBUG\" -gt 2 ]; then
+        set -x
+    fi
+
+    if [ -f /opt/gpudb/fixed_permissions ] || [ -z \"\$KINETICA_USER\" ]; then
+        exit 0
+    fi
+
+KINETICA_USER_HOME=\"/var/lib/\$KINETICA_USER\"
+
+echo \"host \$KINETICA_USER \$KINETICA_USER_HOME\"
+if [ ! -d \"\$KINETICA_USER_HOME\" ]; then
+    mkdir -p \"\$KINETICA_USER_HOME\"
+    chown \$KINETICA_USER:\$KINETICA_USER \"\$KINETICA_USER_HOME\"
+fi
+
+# Add the user with uid of the host, no-op if they already exist.
+getent group \$KINETICA_USER >/dev/null || groupadd --gid \$KINETICA_USER_GID -o \$KINETICA_USER
+getent passwd \$KINETICA_USER >/dev/null || useradd --uid \$KINETICA_USER_UID -g \$KINETICA_USER -M -r -d \$KINETICA_USER_HOME -s /bin/bash -c \"Kinetica persist user\" \$KINETICA_USER
+# Add to the proc group separately in case the user already exists on the system and the above line is not executed.
+usermod -a -G gpudb \$KINETICA_USER
+usermod -a -G gpudb_proc \$KINETICA_USER
+echo updated usermod gpudb \$SECONDS
+
+KINETICA_USER_HOME=$(echo ~\$KINETICA_USER) # in case it already existed
+
+# ensure the home folders for gpudb users are created
+if [ ! -d \"\$KINETICA_USER_HOME\" ]; then
+    mkdir -p \$KINETICA_USER_HOME
+    chown -R \$KINETICA_USER:\$KINETICA_USER \$KINETICA_USER_HOME
+    chmod 755 \$KINETICA_USER_HOME
+fi
+
+# The owner of these can also run db
+chown \$KINETICA_USER:\$KINETICA_USER /opt/gpudb/core/bin
+chown \$KINETICA_USER:\$KINETICA_USER /opt/gpudb/core/bin/gpudb
+
+chown -R \$KINETICA_USER:\$KINETICA_USER /opt/gpudb/core/logs
+chown -R \$KINETICA_USER:\$KINETICA_USER /opt/gpudb/persist
+
+chmod -R ug+rw /opt/gpudb/core/logs
+chmod -R ug+rw /opt/gpudb/core/etc
+chmod -R ug+rw /opt/gpudb/persist
+chmod -R ug+rw /opt/gpudb/tomcat/logs
+chmod    ug+rw /opt/gpudb/tomcat/webapps/gadmin/gpudb_cluster_info.js
+chmod -R ug+rw /opt/gpudb/stats/logs
+chmod -R ug+rw /opt/gpudb/stats/storage
+chmod    ug+rw /opt/gpudb/stats/grafana/public/gpudb_cluster_info.js
+
+chmod    ug+rw /opt/gpudb/*
+chmod    ug+rw /opt/gpudb/*/*
+chmod -R ug+rw /opt/gpudb/*/logs
+
+chmod    ug+rw /opt/gpudb/connectors/*
+chmod    ug+rw /opt/gpudb/connectors/*/logs
+
+[ -d /opt/gpudb/persist/gpudb ] || { mkdir /opt/gpudb/persist/gpudb && chown gpudb:gpudb /opt/gpudb/persist/gpudb; }
+
+echo update group gpudb \$SECONDS
+
+    touch /opt/gpudb/fixed_permissions
+    exit 0
+    "
+
+    # If caller is root then fix permissions of persist mount to make it accessible.
+    if [ "$(id -u)" -eq 0 ]; then
+        run_quiet chown "$KINETICA_USER_UID:$KINETICA_USER_GID" "$PERSIST_DIRECTORY"
+    fi
+
+    if [[ "a$KINETICA_USER" == "agpudb" ]]; then
+        echo "$FIX_PERMISSION_SCRIPT" > "$HOST_PERSIST_DIRECTORY/$PERSIST_SUBDIR/fix_permissions"
+    else # $(whoami)
+        echo "$FIX_PERMISSION_SCRIPT2" > "$HOST_PERSIST_DIRECTORY/$PERSIST_SUBDIR/fix_permissions"
+        run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" sed -i 's@"gpudb"@"$KINETICA_USER"@g' /opt/gpudb-docker-start.sh
+        run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" sed -i 's@su gpudb -c "\$0 \$\@"@su \$KINETICA_USER -c "\$0 \$\@"@g' /opt/gpudb-docker-start.sh
+    fi
+
+    echo "Starting: $DATETIME" > "$HOST_PERSIST_DIRECTORY/$PERSIST_SUBDIR/startup.log"
+
+    chmod ug+x "$HOST_PERSIST_DIRECTORY/$PERSIST_SUBDIR/fix_permissions"
+    if [ "$VERBOSE" -gt 1 ] ; then
+        run_quiet $DOCKER_PROGRAM exec --user root -e "KINETICA_DEBUG=$VERBOSE" "$CONTAINER_NAME" /opt/gpudb/persist/fix_permissions
+    else
+        run_quiet $DOCKER_PROGRAM exec --user root -e "KINETICA_DEBUG=$VERBOSE" "$CONTAINER_NAME" /opt/gpudb/persist/fix_permissions > /dev/null
+    fi
+
+    local S=$SECONDS
+    while ! $DOCKER_PROGRAM exec "$CONTAINER_NAME" ls "/opt/gpudb/fixed_permissions" &> /dev/null ; do
+        printf "."
+        sleep 1
+    done
+
+    fi # use package id update
+
+    if [[ ! "a$OPTIONS" == *"no_update_conf"* ]] ; then
+        run update_conf || exit_func $?
+    fi
+
+    if [ "$RESET_PW" -eq 1 ]; then
+        get_container_labels
+        echo "INSTALL_HASH=$INSTALL_HASH" > "$INSTALL_INFO_FILE" # set for alter_password
+
+        run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" /opt/gpudb/core/bin/gpudb host-manager-stop | sed $SED_UNBUFFER "$SED_REMOVE_PIDS"
+        alter_password
+        run_quiet $DOCKER_PROGRAM start "$CONTAINER_NAME"
+    fi
+
+    # Now run the docker run cmd to finish install, change sleep loop to exit
+    run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" sed -i 's/while true; do/while false; do/g' /opt/gpudb-docker-start.sh
+    run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" sed -i 's@/caravel-\*/@/@g' /opt/gpudb-docker-start.sh
+    run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" /opt/gpudb-docker-start.sh
+
+    get_container_labels
+    # Container is fully created, the hash is checked in is_installed()
+    echo "INSTALL_HASH=$INSTALL_HASH" > "$INSTALL_INFO_FILE"
+    echo "$LABEL_STR" >> "$INSTALL_INFO_FILE"
+
+    echo_status "Install" "Ok"
+}
+
+function check_upgrade
+{
+    get_registry_tags
+    if [ -z "$LATEST_DOCKER_IMAGE" ] ; then
+        echo_status "Check upgrade" "Unable to find latest version, check network connectivity."
+        return $CHECK_UPGRADE_ERROR
+    fi
+    if ! is_created || [ -z "$CURRENT_DOCKER_IMAGE" ]; then
+        echo_status "Check upgrade" "Not installed, latest version: $LATEST_DOCKER_IMAGE"
+        return $CHECK_UPGRADE_ERROR
+    fi
+
+    if [[ "$CURRENT_DOCKER_IMAGE" != "$LATEST_DOCKER_IMAGE" ]]; then
+        echo_status "Check upgrade" "Newer version available: $LATEST_DOCKER_IMAGE"
+        return $CHECK_UPGRADE_NEWER_AVAILABLE
+    fi
+    echo_status "Check upgrade" "Latest version already installed, $CURRENT_DOCKER_IMAGE"
+    return $CHECK_UPGRADE_USING_LATEST
+}
+
+function upgrade_container
+{
+    local WAS_CREATED=0
+    if is_created ; then
+        local WAS_CREATED=1
+    fi
+    get_registry_tags
+
+    if [[ "a$CURRENT_DOCKER_IMAGE" == "a$LATEST_DOCKER_IMAGE" ]]; then
+        echo_status "Upgrade" "Using latest version: $LATEST_DOCKER_IMAGE"
+        return 0
+    fi
+
+    echo_status "Upgrade" "Newer version available $LATEST_DOCKER_IMAGE"
+
+    local WAS_RUNNING=0
+    if is_running ; then
+        WAS_RUNNING=1
+        run stop_container || exit_func $?
+    fi
+
+    if [ "$WAS_CREATED" -eq 1 ] ; then
+        run rm_container || exit_func $?
+        run install_container "check_update" || exit_func $?
+    else
+        run install_container "check_update" || exit_func $?
+    fi
+
+    if [ "$WAS_RUNNING" -eq 1 ]; then
+        start_container
+    fi
+}
+
+# Run, if not already running
+function start_container
+{
+    bind_host_ips bind
+
+    if is_running status ; then
+        echo_status "Start" "Ok (already running)"
+        return 0
+    fi
+
+    if ! check_persist_writable "$HOST_PERSIST_DIRECTORY" CREATE ; then
+        exit_func 1
+    fi
+
+    if ! is_container_running; then
+        echo_status "Start" "$DOCKER_IMAGE as container '$CONTAINER_NAME'"
+        if ! run_quiet LF $DOCKER_PROGRAM start "$CONTAINER_NAME" ; then
+            echo
+            echo_status "Error" "Unable to start Docker container: '$CONTAINER_NAME'"
+            exit_func 1
+        fi
+    fi
+
+    [ "$VERBOSE" -eq 0 ] && printf "%-${ECHO_STATUS_WIDTH}s :  " "Starting"
+
+    ( run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" /etc/init.d/gpudb start | sed $SED_UNBUFFER "$SED_REMOVE_PIDS" ) &
+    local START_PID=$!
+    local i=0
+    while kill -0 "$START_PID" &> /dev/null ; do
+        sleep 1
+        if [ "$VERBOSE" -ne 0 ]; then
+            continue
+        elif [ -t 1 ]; then
+            printf "\b%s" "${SPIN_STR:i++%${#SPIN_STR}:1}"
+        else
+            printf '.'
+        fi
+    done
+    if [ "$VERBOSE" -eq 0 ] && [ -t 1 ] ; then printf "\bOk\n"; fi
+
+    sleep 2
+
+    if ! run_quiet LF $DOCKER_PROGRAM exec "$CONTAINER_NAME" /opt/gpudb/core/bin/gpudb wait-for-running | sed $SED_UNBUFFER "$SED_REMOVE_PIDS" ; then
+        echo
+        echo_status "Error" "Container exited unexpectedly, see docker logs $CONTAINER_NAME"
+        exit_func 1
+    fi
+
+    echo_status "Start" "Ok"
+}
+
+
+# Show info about the container
+function status_container
+{
+    if ! is_created ; then
+        echo_status "Status" "Not installed, rerun with 'start'"
+        return "$NOT_CREATED_RETURN_VALUE"
+    elif ! is_installed ; then
+        echo_status "Status" "Not fully installed, rerun with 'start'"
+        return "$NOT_CREATED_RETURN_VALUE"
+    fi
+
+    local IS_RUNNING_=1
+    is_running || IS_RUNNING_=0
+
+    local CONTAINER_IP=$($DOCKER_PROGRAM inspect --format '{{ .NetworkSettings.IPAddress }}' "$CONTAINER_NAME")
+
+    echo_status "Version"        "$(echo "$CURRENT_DOCKER_IMAGE" | sed 's/^[^:]*://g')"
+    echo_status "Image"          "$CURRENT_DOCKER_IMAGE"
+    if [ "$IS_RUNNING_" -eq 1 ]; then
+        echo_status "Container"  "$CONTAINER_NAME, $CURRENT_CONTAINER_ID, $CONTAINER_IP"
+    fi
+
+    echo_status "Persist path"   "$LABEL_PERSIST_DIR/$PERSIST_SUBDIR"
+    echo_status "Listening to"   "$LABEL_LISTEN_ADDRESS on Hostname:$THIS_HOSTNAME"
+    echo_status "Workbench"      "http://$THIS_HOSTNAME:$LABEL_WORKBENCH_PORT/workbench"
+    echo_status "Kinetica Admin" "http://$THIS_HOSTNAME:$LABEL_GADMIN_PORT/gadmin"
+    echo_status "Reveal"         "http://$THIS_HOSTNAME:$LABEL_REVEAL_PORT"
+    echo_status "Database REST"  "http://$THIS_HOSTNAME:$LABEL_DATABASE_PORT"
+    echo_status "Postgres wire"  "$THIS_HOSTNAME:$LABEL_POSTGRES_PORT"
+
+    if [ "$IS_RUNNING_" -eq 0 ] || ! is_running is-running &> /dev/null; then
+        echo_status "Status" "Stopped"
+        return "$STOPPED_RETURN_VALUE"
+    fi
+
+    echo_status "Status" "Running"
+    return 0
+}
+
+# Fix gpudb.conf's rankN.host for the specified number of ranks and containers.
+function update_conf
+{
+    if ! is_running ; then
+        echo_status "Error" "Container exited unexpectedly, see docker logs $CONTAINER_NAME"
+        exit_func 1
+    fi
+
+    if ! $DOCKER_PROGRAM exec "$CONTAINER_NAME" ls -1 /opt/gpudb/core/etc/gpudb.conf &> /dev/null; then
+        echo_status "Error" "Missing configuration file: '/opt/gpudb/core/etc/gpudb.conf' in container '$CONTAINER_NAME'"
+        exit_func 1
+    fi
+
+    run_quiet echo_status "Configure" "Setup local configuration"
+
+    # Remove all rankN.host lines including linefeeds, except rank0 and 1
+    run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" sed -i '/^[ \t]*rank[2-9][0-9]*\.host[ \t]*=/d' /opt/gpudb/core/etc/gpudb.conf
+    #run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" grep -E "[ \t]*rank[0-9]*.host" /opt/gpudb/core/etc/gpudb.conf
+
+    run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" sed -i "s/^[ \t]*enable_procs[ \t]*=.*$/enable_procs = true/g" /opt/gpudb/core/etc/gpudb.conf
+
+    run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" sed -i "s/^[ \t]*enable_text_search[ \t]*=.*$/enable_text_search = true/g" /opt/gpudb/core/etc/gpudb.conf
+    run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" sed -i "s/^[ \t]*use_external_text_server[ \t]*=.*$/use_external_text_server = true/g" /opt/gpudb/core/etc/gpudb.conf
+
+    run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" sed -i "s/^[ \t]*enable_graph_server[ \t]*=.*$/enable_graph_server = true/g" /opt/gpudb/core/etc/gpudb.conf
+
+    run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" sed -i "s/^[ \t]*load_vectors_on_start[ \t]*=.*$/load_vectors_on_start = on_demand/g" /opt/gpudb/core/etc/gpudb.conf
+    run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" sed -i "s/^[ \t]*build_pk_index_on_start[ \t]*=.*$/build_pk_index_on_start = on_demand/g" /opt/gpudb/core/etc/gpudb.conf
+    run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" sed -i "s/^[ \t]*build_materialized_views_on_start[ \t]*=.*$/build_materialized_views_on_start = on_demand/g" /opt/gpudb/core/etc/gpudb.conf
+
+    run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" sed -i "s/^[ \t]*enable_worker_http_servers[ \t]*=.*$/enable_worker_http_servers = false/g" /opt/gpudb/core/etc/gpudb.conf
+
+    run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" sed -i "s@^[ \t]*persist_directory[ \t]*=.*\$@persist_directory = $DOCKER_PERSIST_DIRECTORY@g" /opt/gpudb/core/etc/gpudb.conf
+    # Use temp dir inside container, OSX VirtioFS does not support zmq ipc:// sockets.
+    run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" sed -i "s@^[ \t]*temp_directory[ \t]*=.*\$@temp_directory = /tmp@g" /opt/gpudb/core/etc/gpudb.conf
+
+    if [ "${#GPUDB_CONF_UPDATES[@]}" -gt 0 ]; then
+    local K=
+    local V=
+    for C in "${GPUDB_CONF_UPDATES[@]}"; do
+        if ! K=$(echo "$C" | cut -d= -f1) || ! V=$(echo "$C" | cut -d= -f2-) || [ -z "$K" ] ||  [ -z "$V" ]; then
+            echo_status "Bad config" "Unable to parse '$C', expected 'key=value' for gpudb.conf"
+            exit_func 1
+        fi
+        run_quiet $DOCKER_PROGRAM exec "$CONTAINER_NAME" sed -i "s#^[ \t]*${K}[ \t]*=.*\$#${K} = ${V}#g" /opt/gpudb/core/etc/gpudb.conf
+    done
+    fi
+
+    run_quiet echo_status "Configure" "Ok"
+}
+
+function do_open_browser
+{
+    local URL="$1"
+
+    local OPEN_CMD=""
+
+    if [[ "$LOCAL_OS" == "darwin" ]] ; then
+        OPEN_CMD="open"
+    elif which xdg-open &> /dev/null ; then
+        OPEN_CMD="xdg-open"
+    fi
+
+    if [ -n "$OPEN_CMD" ]; then
+        run_quiet "$OPEN_CMD" "$URL"
+        return $?
+    else
+        echo_status "Open" "Unavailable, please install the xdg-open tool."
+        return 1
+    fi
+}
+
+function open_workbench
+{
+    if ! is_container_running; then # ok if db is down to get to workbench
+        echo_status "Error" "Kinetica is not running, please rerun with 'start open-workbench'"
+        return 1
+    fi
+
+    echo_status "Open" "http://localhost:$LABEL_WORKBENCH_PORT"
+    do_open_browser "http://localhost:$LABEL_WORKBENCH_PORT"
+}
+function open_gadmin
+{
+    if ! is_container_running; then # ok if db is down to get to gadmin
+        echo_status "Error" "Kinetica is not running, please rerun with 'start open-gadmin'"
+        return 1
+    fi
+
+    echo_status "Open" "http://localhost:$LABEL_GADMIN_PORT/gadmin"
+    do_open_browser "http://localhost:$LABEL_GADMIN_PORT/gadmin"
+}
+function open_reveal
+{
+    if ! is_running; then
+        echo_status "Error" "Kinetica is not running, please rerun with 'start open-reveal'"
+        return 1
+    fi
+
+    echo_status "Open" "http://localhost:$LABEL_REVEAL_PORT"
+    do_open_browser "http://localhost:$LABEL_REVEAL_PORT"
+}
+
+function alter_password
+{
+    if ! is_installed; then
+        echo_status "Error" "Kinetica is not installed, please rerun with 'start'"
+        return 1
+    fi
+
+    if is_running is-running; then
+        echo_status "Error" "Kinetica is running, please 'stop' or rerun with 'restart alter-password' to set the password for $ALTER_PASSWORD_USER."
+        return 1
+    fi
+
+    local PW="${KINETICA_ADMIN_PASSWORD:-}"
+    local PW2=""
+    local MAX_PW_LENGTH=256
+
+    if [ -n "$PW" ] ; then
+        echo_status "Alter password" "Using environment variable KINETICA_ADMIN_PASSWORD"
+    fi
+
+    while [ -z "$PW" ]; do
+        read -p "Enter new password for $ALTER_PASSWORD_USER : " -s -r -n "$MAX_PW_LENGTH" PW
+        echo
+        if [ -z "$PW" ]; then
+            echo_status "Alter password" "Empty new password, aborting."
+            exit_func 1
+        fi
+        read -p "Re-enter password for $ALTER_PASSWORD_USER : " -s -r -n "$MAX_PW_LENGTH" PW2
+        echo
+        if [[ "a$PW" == "a$PW2" ]]; then
+            break
+        fi
+        echo_status "Error" "Passwords didn't match, please try again."
+        PW=
+        echo
+    done
+
+    run_quiet $DOCKER_PROGRAM start "$CONTAINER_NAME"
+    # Don't chmod persist path mount point, only the new file, this is no-op in >= 7.2.2.9
+    run_quiet $DOCKER_PROGRAM exec --user "$ENV_KINETICA_USER" "$CONTAINER_NAME" sed -i "s/os.chown(persist_path, uid, gid)/#os.chown(persist_path, uid, gid)/g; s/os.chmod(persist_path, 0o771)/#os.chmod(persist_path, 0o771)/g; s/for dirName, subdirList, fileList in os.walk(persist_path):/return True\n    for dirName, subdirList, fileList in os.walk(persist_path):/g" /opt/gpudb/core/bin/gpudb_alter_password.py
+    run_quiet $DOCKER_PROGRAM exec --user "$ENV_KINETICA_USER" "$CONTAINER_NAME" /opt/gpudb/core/bin/gpudb_env.sh /opt/gpudb/core/bin/gpudb_alter_password.py "$ALTER_PASSWORD_USER" "$PW" /opt/gpudb/core/etc/gpudb.conf
+    run_quiet $DOCKER_PROGRAM exec --user "$ENV_KINETICA_USER" "$CONTAINER_NAME" bash -c "/opt/gpudb/connectors/reveal/gpudb-reveal.sh run_cmd \
+fabmanager create-admin --app caravel --username '$ALTER_PASSWORD_USER' --password '$PW' \
+--firstname '$ALTER_PASSWORD_USER' --lastname User --email '$ALTER_PASSWORD_USER@$DOCKER_HOST_NAME' ; \
+/opt/gpudb/connectors/reveal/gpudb-reveal.sh run_cmd \
+fabmanager reset-password --app caravel --username '$ALTER_PASSWORD_USER' --password '$PW'" | grep -vE "Registering (class|route) "
+
+    run_quiet $DOCKER_PROGRAM stop "$CONTAINER_NAME"
+
+    echo_status "Success" "Password for user $ALTER_PASSWORD_USER has been updated and Kinetica is stopped."
+    # Might be called at end of install, only ask once.
+    ALTER_PASSWORD=0
+}
+
+function get_registry_tags
+{
+    if [ -n "$REGISTRY_TAGS" ]; then
+        return 0
+    fi
+
+    #local TAGS=$(printf "\n$DOCKER_IMAGE ON\n"; wget -q https://registry.hub.docker.com/v1/repositories/kinetica/kinetica-intel/tags -O -  | sed -e 's/[][]//g' -e 's/"//g' -e 's/ //g' | tr '}' '\n'  | awk -F: '{print $3}' | grep "^7.[1-9].[1-9] | sed 's/$/ OFF/g'" 2>&1)
+#    REGISTRY_TAGS=$(wget -q https://registry.hub.docker.com/v1/repositories/$DOCKER_IMAGE_REPO/tags -O - 2>&1)
+    REGISTRY_TAGS=$(curl -s "https://registry.hub.docker.com/v2/repositories/$DOCKER_IMAGE_REPO/tags?page_size=$KINETICA_SHOW_VERSIONS" 2>&1)
+    if ! echo "$REGISTRY_TAGS" | grep -q "[0-9]\.[0-9]\.[0-9]" > /dev/null ; then
+        echo_status "Error" "Unable to retrieve latest docker tags from: https://registry.hub.docker.com/v2/repositories/$DOCKER_IMAGE_REPO/tags"
+        echo "$REGISTRY_TAGS"
+        return 1
+    fi
+    # list of docker tags 7.1.3.0.20210219180351.ga
+    REGISTRY_TAG_LIST=$(echo "$REGISTRY_TAGS" | sed -e 's/[][]//g' -e 's/"//g' -e 's/ //g' | tr '}' '\n' | sed  -n $SED_EXT_RE 's/^.*name:(7\.[1-9]+\.[0-9]+\.[0-9]+[^ ,]*).*$/\1/p' | grep -vE "amd64|arm64" | sort -rV)
+    if ! echo "$REGISTRY_TAG_LIST" | grep -q "[0-9]\.[0-9]\.[0-9]" > /dev/null ; then
+        echo_status "Error" "Unable to parse latest docker tag versions."
+        return 1
+    fi
+
+    LATEST_REGISTRY_TAG_VERSION=$(echo "$REGISTRY_TAG_LIST" | head -n 1)
+    LATEST_DOCKER_IMAGE="$DOCKER_IMAGE_REPO:$LATEST_REGISTRY_TAG_VERSION"
+
+    if [ "$VERBOSE" -gt 2 ]; then
+        echo "$REGISTRY_TAGS"
+    fi
+    if [ "$VERBOSE" -gt 1 ]; then
+        echo_status "Registry tags" ""
+        echo "$REGISTRY_TAG_LIST"
+        echo "LATEST_REGISTRY_TAG_VERSION=$LATEST_REGISTRY_TAG_VERSION"
+        echo "LATEST_DOCKER_IMAGE=$LATEST_DOCKER_IMAGE"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+
+function wait_keypress
+{
+    read -p "Press any key to continue... " -n1 -s
+}
+
+function run_or_wait
+{
+    echo
+    echo_status "Exec" "$*"
+    if "$@" ; then
+        sleep $WAIT_SECS
+    else
+        wait_keypress
+    fi
+}
+
+function show_menu
+{
+    if ! which $DOCKER_PROGRAM > /dev/null; then
+        whiptail --title "Docker executable 'docker' not found" \
+                 --msgbox "Please install docker, see https://docs.docker.com/get-docker" 8 65
+        exit_func 1
+    fi
+    if ! (check_docker) ; then
+        #echo "Press any key to exit."
+        #read -s -n 1
+        if [ "$LOCAL_OS" == "darwin" ]; then
+            whiptail --title "Docker is not running" \
+                     --msgbox "Please start docker, see https://docs.docker.com/docker-for-mac/install" 8 65
+        else
+            whiptail --title "Docker is not running or accessible" \
+                     --msgbox "Please start docker and configure user permissions, see https://docs.docker.com/engine/install" 8 65
+        fi
+        exit_func 1
+    fi
+
+    while true; do
+        do_show_menu || true
+    done
+}
+
+function elipsis_str
+{
+    local LEN="$1"
+    local S="$2"
+
+    if [ "${#S}" -gt "$LEN" ]; then
+        echo "$(echo "$S" | head -c $(( LEN - 4 )) ) ..."
+    else
+        echo "$S"
+    fi
+}
+
+function do_show_menu
+{
+    local STTY_HEIGHT=$(( $(stty size | cut -d' ' -f1) - 4 ))
+    local STTY_WIDTH=$(( $(stty size | cut -d' ' -f2) - 4 ))
+    local D_WIDTH=87
+    local D_HEIGHT=20
+    local D_SIZE="$D_HEIGHT $D_WIDTH"
+
+    local TITLE_STR="Kinetica Developer Edition"
+    local STATUS_STR=""
+    local INSTALL_STR=""
+    local UPGRADE_STR=""
+
+    if is_created ; then
+        STATUS_STR="Stopped $KINETICA_VERSION"
+        INSTALL_STR="Installed"
+        UPGRADE_STR="Latest version installed"
+    else
+        STATUS_STR="Not installed"
+        INSTALL_STR="Install the latest version"
+        UPGRADE_STR="Latest version: $LATEST_REGISTRY_TAG_VERSION"
+    fi
+
+    if check_upgrade > /dev/null; then
+        UPGRADE_STR="New version available: $LATEST_REGISTRY_TAG_VERSION"
+    fi
+
+    if is_running ; then
+        STATUS_STR="Running $KINETICA_VERSION"
+    fi
+
+    local RET=0
+    local OPTION=
+    OPTION=$(whiptail --nocancel --title "$TITLE_STR" \
+            --menu "Choose action or change setting" $D_SIZE 13 \
+            "Status"    "$STATUS_STR" \
+            "Open Workbench" "Open browser to SQL Workbench tool" \
+            "Open GAdmin"    "Open browser to admin interface" \
+            "Open Reveal"    "Open browser to dashboard builder" \
+            "Start"     "Start the Kinetica Information System Suite" \
+            "Restart"   "Restart with current options" \
+            "Install"   "$INSTALL_STR" \
+            "Upgrade"   "$UPGRADE_STR" \
+            ""          "" \
+            "Stop"      "Stop Kinetica" \
+            "Kill"      "Terminate the container" \
+            "Clear"     "Terminate Kinetica and erase all data" \
+            "Remove"    "Terminate Kinetica and remove the container" \
+            "Uninstall" "Remove the container and image" \
+            ""          "" \
+            "Password"  "Change the admin user password" \
+            "Data"      "$(elipsis_str $(( D_WIDTH - 20 )) $HOST_PERSIST_DIRECTORY)" \
+            ""          "" \
+            "Help"      "About this installer" \
+            "Docs"      "https://www.kinetica.com/docs" \
+            "License"   "https://www.kinetica.com/agreements/license-agreement-trial-edition" \
+            "Exit"      "" \
+            3>&1 1>&2 2>&3) || RET=$?
+    if [ $RET -ne 0 ]; then
+        exit_func 0
+    fi
+
+    local WAIT_SECS=3
+    echo
+    case "$OPTION" in
+        Status)
+            local STATUS_RET=0
+            local STATUS_STR=
+            STATUS_STR=$($THIS_SCRIPT status --persist "$HOST_PERSIST_DIRECTORY" 2>&1) || STATUS_RET=$?
+            echo_status "Status" "Return value: $STATUS_RET"
+            echo "$STATUS_STR"
+            echo
+            # whiptail --textbox /dev/stdin and bash >= 5.1 are empty unless size is > 64k
+            #whiptail --scrolltext --default-item "ok" --title "Kinetica Status" --textbox /dev/stdin $D_SIZE <<< "$STATUS_STR"
+            whiptail --scrolltext --default-item "ok" --title "Kinetica Status" --msgbox "$STATUS_STR" $D_SIZE || true
+            ;;
+        "Open Workbench")
+            run_or_wait "$THIS_SCRIPT" open-workbench --persist "$HOST_PERSIST_DIRECTORY" || true
+            ;;
+        "Open GAdmin")
+            run_or_wait "$THIS_SCRIPT" open-gadmin --persist "$HOST_PERSIST_DIRECTORY" || true
+            ;;
+        "Open Reveal")
+            run_or_wait "$THIS_SCRIPT" open-reveal --persist "$HOST_PERSIST_DIRECTORY" || true
+            ;;
+        Start)
+            run_or_wait "$THIS_SCRIPT" start --persist "$HOST_PERSIST_DIRECTORY" || true
+            ;;
+        Restart)
+            run_or_wait "$THIS_SCRIPT" restart --persist "$HOST_PERSIST_DIRECTORY" || true
+            ;;
+        Install)
+            run_or_wait "$THIS_SCRIPT" install --persist "$HOST_PERSIST_DIRECTORY" || true
+            ;;
+        Upgrade)
+            get_registry_tags
+            local REGISTRY_LIST=$(printf "\nlatest OFF\n"; echo "$REGISTRY_TAG_LIST" | sed "s/$/ OFF/g")
+            REGISTRY_LIST=$(echo "$REGISTRY_LIST" | head -n 10 | sed "s/$DOCKER_IMAGE_TAG OFF/$DOCKER_IMAGE_TAG ON/g")
+            while true; do
+                local P=
+                if P=$(whiptail --title "Kinetica Version" --noitem \
+                                --radiolist "Specify a $DOCKER_IMAGE_REPO image version" 18 70 10 \
+                                $REGISTRY_LIST 3>&1 1>&2 2>&3) && [ -n "$P" ] ; then
+                    if [[ "a$P" == "alatest" ]]; then
+                        run_or_wait "$THIS_SCRIPT" upgrade --persist "$HOST_PERSIST_DIRECTORY" || true
+                    else
+                        run_or_wait "$THIS_SCRIPT" rm install --version "$P" --persist "$HOST_PERSIST_DIRECTORY" || true
+                    fi
+                fi
+                break # cancel
+            done
+            ;;
+        Stop)
+            run_or_wait "$THIS_SCRIPT" stop || true
+            ;;
+        Kill)
+            run_or_wait "$THIS_SCRIPT" kill || true
+            ;;
+        Clear)
+            if whiptail --title "Erase all data" --yesno "Delete data and stop db?\n$HOST_PERSIST_DIRECTORY" 8 $STTY_WIDTH; then
+                run_or_wait "$THIS_SCRIPT" clear --persist "$HOST_PERSIST_DIRECTORY" || true
+            fi
+            ;;
+        Remove)
+            run_or_wait "$THIS_SCRIPT" rm || true
+            ;;
+        Uninstall)
+            run_or_wait "$THIS_SCRIPT" uninstall || true
+            ;;
+        Password)
+            run_or_wait "$THIS_SCRIPT" alter-password || true
+            ;;
+        Data)
+            while true; do
+                local P=
+                if P=$(whiptail --inputbox "Specify a storage directory" 8 $STTY_WIDTH \
+                                "$HOST_PERSIST_DIRECTORY" \
+                                --title "Data Persist Directory" 3>&1 1>&2 2>&3) && [ -n "$P" ] ; then
+                    if [ ! -d "$P" ]; then
+                        echo_status "Creating" "$P"
+                        mkdir -p "$P"
+                    fi
+                    if [ -d "$P" ] && check_persist_writable "$P"; then
+                        HOST_PERSIST_DIRECTORY="$P/$PERSIST_SUBDIR"
+                        break
+                    else
+                        whiptail --title "Invalid or missing directory" \
+                                 --msgbox "Please specify an existing writable directory.\n" 8 70 || true
+                    fi
+                else
+                    break # cancel
+                fi
+            done
+            ;;
+
+        Help)
+            whiptail --scrolltext --default-item "Ok" --title "Kinetica Installer Help" \
+                     --msgbox "$(show_help)" 20 90 || true
+            ;;
+        Documentation)
+            run_or_wait do_open_browser "https://www.kinetica.com/docs" || true
+            ;;
+        License)
+            run_or_wait do_open_browser "https://www.kinetica.com/agreements/license-agreement-trial-edition" || true
+            ;;
+        Exit)
+            exit_func 0
+            ;;
+    esac
+}
+
+
+TEST_TIME_START_SECONDS=$SECONDS
+function print_test_time
+{
+    echo "elapsed $(( SECONDS - TEST_TIME_START_SECONDS ))s, $(date '+%Y-%m-%d %H:%M:%S')"
+}
+
+function run_cmd_check_return_code
+{
+    local RUN_LOCAL=0
+    if [ "$1" = "RUN_LOCAL" ]; then
+        shift
+        RUN_LOCAL=1
+    fi
+
+    local CMD="$1"
+    local EXPECTED_RET_CODE="$2"
+    local RET_CODE=0
+
+    TEST_NUM=$(( TEST_NUM + 1 ))
+    echo
+    # Echo datetime to help find issues in the log
+    echo_status "-TESTING $TEST_NUM" "$CMD : $(print_test_time)"
+    local RUN_CMD_START_SECONDS=$SECONDS
+
+    if [ "$RUN_LOCAL" -eq 1 ]; then
+        $CMD || RET_CODE=$?
+    else
+        bash -c "$CMD" || RET_CODE=$?
+    fi
+
+    if { [ "$EXPECTED_RET_CODE" -eq 0 ] && [ "$RET_CODE" -ne 0 ]; } || \
+       { [ "$EXPECTED_RET_CODE" -ne 0 ] && [ "$RET_CODE" -eq 0 ]; }; then
+        echo "Error running cmd: '$CMD', expected return value of '$EXPECTED_RET_CODE', got '$RET_CODE', exiting."
+        exit 1
+    fi
+
+    echo_status "-SUCCESS $TEST_NUM" "in $(( SECONDS - RUN_CMD_START_SECONDS ))s, $(print_test_time)"
+}
+
+
+function check_ports
+{
+    local IP="${1:-127.0.0.1}"
+
+    is_created
+
+    run_quiet curl -s -S "$IP:$LABEL_GADMIN_PORT" || return 1
+    run_quiet curl -s -S "$IP:$LABEL_REVEAL_PORT" || return 1
+    run_quiet curl -s -S "$IP:$LABEL_DATABASE_PORT" || return 1
+    run_quiet curl -s -S "$IP:$LABEL_WORKBENCH_PORT" || return 1
+
+    if type nc &> /dev/null; then
+        run_quiet bash -c "nc -v -w1 '$IP' '$LABEL_POSTGRES_PORT' < /dev/null" || return 1
+    elif type telnet &> /dev/null; then
+        run_quiet bash -c "echo -e '\x1dclose\x0d' | telnet '$IP' '$LABEL_POSTGRES_PORT'" || return 1
+    else # bash with --enable-net-redirection, not osx
+        run_quiet timeout 1 bash -c "(echo > /dev/tcp/$IP/$LABEL_POSTGRES_PORT) 2>&1" || return 1
+    fi
+}
+
+function self_test
+{
+    local TEST_FLAGS=""
+
+    if [ "$VERBOSE" -gt 0 ]; then
+        TEST_FLAGS+="-v"
+    fi
+    if [ "$VERBOSE" -gt 1 ]; then
+        TEST_FLAGS+=" -v"
+    fi
+    if [ "$VERSION_SPECIFIED" -eq 1 ]; then
+        TEST_FLAGS+=" --version $DOCKER_IMAGE_TAG"
+    fi
+
+    TEST_NUM=0
+    TEST_TIME_START_SECONDS=$SECONDS
+
+    # Use subdir to check that a specified persist dir is honored and we don't revert to default
+    local TEST_SUBDIR="$THIS_SCRIPT_DIR/self-test-kinetica_docker"
+
+    run_quiet mkdir -p "$TEST_SUBDIR"
+    pushd "$TEST_SUBDIR" > /dev/null || return 1
+
+    echo_status "Self test" "$THIS_SCRIPT_NAME"
+    echo_status "Execute in" "$(pwd)"
+
+    # Use a new subdir to test clear, don't use default.
+    local TEST_PERSIST_DIRECTORY="./self-test-kinetica_docker-tmp$$"
+    local PERSIST_FLAG="--persist $TEST_PERSIST_DIRECTORY"
+    export LC_ALL=C # fixes osx error with tr reading random bytes
+    local PW0=$( < /dev/urandom tr -dc _A-Z-a-z-0-9 | head -c16 )
+    local PW1=$( < /dev/urandom tr -dc _A-Z-a-z-0-9 | head -c16 )
+    local PW2=$( < /dev/urandom tr -dc _A-Z-a-z-0-9 | head -c16 )
+    export KINETICA_ADMIN_PASSWORD="$PW0"
+
+    local TEST_EXE="../$THIS_SCRIPT_NAME $TEST_FLAGS"
+
+    run_cmd_check_return_code "$TEST_EXE -h | grep 'Usage'" 0
+    run_cmd_check_return_code "$TEST_EXE show-versions | grep '^[ ]*[7-9]\.[0-9]\.[0-9]'" 0
+
+    run_cmd_check_return_code "$TEST_EXE rm" 0
+    run_cmd_check_return_code "$TEST_EXE status" "$NOT_CREATED_RETURN_VALUE"
+    run_cmd_check_return_code "$TEST_EXE check-upgrade" "$CHECK_UPGRADE_ERROR"
+
+    run_cmd_check_return_code "$TEST_EXE install $PERSIST_FLAG" 0
+    run_cmd_check_return_code "$TEST_EXE status" "$STOPPED_RETURN_VALUE"
+    run_cmd_check_return_code "$TEST_EXE check-upgrade" "$CHECK_UPGRADE_USING_LATEST"
+    run_cmd_check_return_code "$TEST_EXE start" 0
+    run_cmd_check_return_code "$TEST_EXE status" 0
+    run_cmd_check_return_code RUN_LOCAL "check_ports" 0
+    run_cmd_check_return_code "curl -f -S -I http://admin:$PW0@localhost:9191/wms?REQUEST=GetCapabilities" 0
+    run_cmd_check_return_code "ls -A $TEST_PERSIST_DIRECTORY/$PERSIST_SUBDIR/gpudb" 0
+    run_cmd_check_return_code "$TEST_EXE check-upgrade" "$CHECK_UPGRADE_USING_LATEST"
+    run_cmd_check_return_code "$TEST_EXE restart" 0
+    run_cmd_check_return_code "$TEST_EXE status" 0
+    run_cmd_check_return_code "$TEST_EXE stop" 0
+    run_cmd_check_return_code "$TEST_EXE status" "$STOPPED_RETURN_VALUE"
+    run_cmd_check_return_code "$TEST_EXE kill" 0
+    run_cmd_check_return_code "$TEST_EXE status" "$STOPPED_RETURN_VALUE"
+    run_cmd_check_return_code "$TEST_EXE clear $PERSIST_FLAG" 0
+    run_cmd_check_return_code "ls -A $TEST_PERSIST_DIRECTORY/$PERSIST_SUBDIR" 1
+
+    run_cmd_check_return_code "$TEST_EXE rm" 0
+    run_cmd_check_return_code "$TEST_EXE install $PERSIST_FLAG" 0
+    run_cmd_check_return_code "$TEST_EXE stop" 0
+    run_cmd_check_return_code "KINETICA_ADMIN_PASSWORD=$PW1 $TEST_EXE alter-password" 0
+    run_cmd_check_return_code "$TEST_EXE start $PERSIST_FLAG" 0
+    run_cmd_check_return_code "$TEST_EXE status" 0
+    run_cmd_check_return_code "curl -f -S -I http://admin:$PW1@localhost:9191/wms?REQUEST=GetCapabilities" 0
+    run_cmd_check_return_code "ls -A $TEST_PERSIST_DIRECTORY/$PERSIST_SUBDIR/gpudb" 0
+    run_cmd_check_return_code "KINETICA_ADMIN_PASSWORD=$PW2 $TEST_EXE alter-password" 1
+    run_cmd_check_return_code "$TEST_EXE kill" 0
+    run_cmd_check_return_code "$TEST_EXE status" "$STOPPED_RETURN_VALUE"
+    run_cmd_check_return_code "$TEST_EXE stop" 0
+    run_cmd_check_return_code "$TEST_EXE status" "$STOPPED_RETURN_VALUE"
+    run_cmd_check_return_code "KINETICA_ADMIN_PASSWORD=$PW2 $TEST_EXE alter-password" 0
+
+    run_cmd_check_return_code "$TEST_EXE start" 0
+    run_cmd_check_return_code "$TEST_EXE status" 0
+    run_cmd_check_return_code "curl -f -S -I http://admin:$PW2@localhost:9191/wms?REQUEST=GetCapabilities" 0
+    run_cmd_check_return_code "$TEST_EXE kill" 0
+    run_cmd_check_return_code "$TEST_EXE status" "$STOPPED_RETURN_VALUE"
+
+    run_cmd_check_return_code "$TEST_EXE restart" 0
+    run_cmd_check_return_code "$TEST_EXE rm" 0
+    run_cmd_check_return_code "$TEST_EXE status" "$NOT_CREATED_RETURN_VALUE"
+
+    run_cmd_check_return_code "$TEST_EXE start --gadmin-port $((GADMIN_PORT+1)) --reveal-port $((REVEAL_PORT+1)) --database-port $((DATABASE_PORT+1)) --postgres-port $((POSTGRES_PORT+1)) --workbench-port $((WORKBENCH_PORT+1)) $PERSIST_FLAG" 0
+    run_cmd_check_return_code "$TEST_EXE status" 0
+    run_cmd_check_return_code RUN_LOCAL "check_ports" 0
+
+    run_cmd_check_return_code "$TEST_EXE rm" 0
+    run_cmd_check_return_code "$TEST_EXE restart --gadmin-port $((GADMIN_PORT+2)) --reveal-port $((REVEAL_PORT+2)) --database-port $((DATABASE_PORT+2)) --postgres-port $((POSTGRES_PORT+2)) --workbench-port $((WORKBENCH_PORT+2)) --listen-address '$HOST_IP' $PERSIST_FLAG" 0
+    run_cmd_check_return_code "$TEST_EXE status" 0
+    run_cmd_check_return_code RUN_LOCAL "check_ports $HOST_IP" 0
+
+    run_cmd_check_return_code "find $TEST_PERSIST_DIRECTORY -not -user $(id -u)" 0
+    run_cmd_check_return_code "find $TEST_PERSIST_DIRECTORY -not -group $(id -g)" 0
+
+    run_cmd_check_return_code "$TEST_EXE clear" 0
+    run_cmd_check_return_code "ls -A $TEST_PERSIST_DIRECTORY/$PERSIST_SUBDIR" 1
+
+    run_cmd_check_return_code "$TEST_EXE rm" 0
+    run_cmd_check_return_code "$TEST_EXE status" "$NOT_CREATED_RETURN_VALUE"
+
+    run_cmd_check_return_code RUN_LOCAL "get_registry_tags" 0
+
+    local TEST_UPGRADE=1
+    local SECOND_LATEST_REGISTRY_TAG_VERSION=$(echo "$REGISTRY_TAG_LIST" | head -n2 | tail -n1)
+    if [ "$TEST_UPGRADE" -eq 1 ] && \
+        [[ "a$LATEST_REGISTRY_TAG_VERSION" != "a$SECOND_LATEST_REGISTRY_TAG_VERSION" ]] ; then
+        run_cmd_check_return_code "$TEST_EXE start --version $SECOND_LATEST_REGISTRY_TAG_VERSION $PERSIST_FLAG" 0
+        run_cmd_check_return_code "$TEST_EXE check-upgrade" "$CHECK_UPGRADE_NEWER_AVAILABLE"
+        run_cmd_check_return_code "$TEST_EXE upgrade" 0
+        run_cmd_check_return_code "$TEST_EXE check-upgrade" "$CHECK_UPGRADE_USING_LATEST"
+        run_cmd_check_return_code "$TEST_EXE status" 0
+    fi
+
+    run_cmd_check_return_code "ls -A ./$PERSIST_SUBDIR" 1 # check staying inside TEST_PERSIST_DIRECTORY
+    run_cmd_check_return_code "$TEST_EXE rm" 0
+    run_cmd_check_return_code "$TEST_EXE status" "$NOT_CREATED_RETURN_VALUE"
+    run_cmd_check_return_code "$TEST_EXE clear $PERSIST_FLAG" 0
+    # New persist dir should be empty after clear
+    run_cmd_check_return_code "rmdir '$TEST_PERSIST_DIRECTORY'" 0
+    # Clean top-level test dir to cleanup on success, may have remnants of old runs if ctrl-c
+    popd > /dev/null
+    run_cmd_check_return_code "rm -Rf '$TEST_SUBDIR'" 0
+
+    echo
+    echo_status "Self test" "Ok"
+}
+
+# ---------------------------------------------------------------------------
+
+# Run command and prefix output with NAME. Returns correct error code.
+function run_name
+{
+    local NAME="$1"
+    shift
+
+    "$@" | sed $SED_UNBUFFER "s/^/$NAME: /" || return $?
+}
+
+function run_quiet
+{
+    local ADD_LF=0
+    if [[ "a$1" == "aLF" ]]; then
+        ADD_LF=1
+        shift
+    fi
+    local C="$*"
+
+    if [ "$VERBOSE" -gt 0 ]; then
+        echo_status "Debug" "\$ $C"
+    fi
+
+    local RET_=0
+    local R=
+    R=$("$@" 2>&1) || RET_=$?
+
+    if [ -n "$R" ] && { [ $RET_ -ne 0 ] || [ "$VERBOSE" -gt 0 ]; }; then
+        [ $ADD_LF -eq 1 ] && echo
+        echo "$R"
+    fi
+
+    if [ $RET_ -ne 0 ]; then
+        echo_status "Error running" "$C"
+    fi
+
+    return $RET_
+}
+
+function run
+{
+    local C="$*"
+    RUN_CMDS+="$C
+"
+
+    if [ "$VERBOSE" -gt 0 ]; then
+        echo_status "Debug" "\$ $C"
+    fi
+
+    # Not using eval to preserve quoted args with spaces and not have to requote.
+    local RET_=0
+    "$@" 2>&1 || RET_=$?
+
+    if [ $RET_ -ne 0 ]; then
+        RUN_RET=$RET_ # just take last non zero
+        RUN_ERROR_COUNT=$(( RUN_ERROR_COUNT + 1 ))
+        RUN_ERROR_STR+=$"ERROR code:$RET_ in $C
+"
+        #echo "ERROR code:$RET_ in $C"
+    fi
+
+    return $RET_
+}
+
+function exit_func
+{
+    local EXIT_VAL="${1:-}"
+
+    trap - EXIT
+    #echo "$RUN_CMDS"
+    if [ $RUN_ERROR_COUNT -gt 0 ]; then
+        #echo -e "ERROR in $RUN_ERROR_COUNT command(s)."
+        #echo -e "$RUN_ERROR_STR"
+        exit $RUN_RET
+    fi
+    if [ -n "$EXIT_VAL" ]; then
+        exit "$EXIT_VAL"
+    fi
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
+# Kill children, ctrl-C during sleep can create orphan jobs.
+
+function kill_children()
+{
+    local CHILD_PIDS=""
+
+    for i in 1 2 3 4; do
+        CHILD_PIDS=$(jobs -pr)
+        if [ -z "$CHILD_PIDS" ]; then
+            exit_func
+        fi
+
+        run_quiet echo_status "Children" "$(echo $CHILD_PIDS)"
+        kill $CHILD_PIDS &> /dev/null
+        sleep 2
+    done
+
+    CHILD_PIDS=$(jobs -pr)
+    if [ -n "$CHILD_PIDS" ]; then
+        kill -9 $CHILD_PIDS &> /dev/null
+    fi
+
+    exit_func
+}
+
+trap "trap - SIGHUP SIGINT SIGTERM && kill_children" SIGHUP SIGINT SIGTERM
+
+# ---------------------------------------------------------------------------
+# Command line parsing
+
+get_container_labels "set-defaults" #  &> /dev/null
+
+ARGS=( "$@" )
+NUMBER_OF_ARGS=$#
+RET=0
+
+while [ $# -gt 0 ]; do
+    key="$1"
+    shift
+
+    case $key in
+        install)
+            INSTALL_CONTAINER=1
+            ;;
+        upgrade)
+            UPGRADE_CONTAINER=1
+            ;;
+        start|run)
+            START_CONTAINER=1
+            ;;
+        restart)
+            STOP_CONTAINER=1
+            START_CONTAINER=1
+            ;;
+        stop)
+            STOP_CONTAINER=1
+            ;;
+        kill)
+            KILL_CONTAINER=1
+            ;;
+        rm)
+            RM_CONTAINER=1
+            ;;
+        uninstall)
+            KILL_CONTAINER=1
+            RM_CONTAINER=1
+            UNINSTALL_CONTAINER=1
+            ;;
+        clear)
+            KILL_CONTAINER=1
+            CLEAR_PERSIST=1
+            ;;
+        status)
+            STATUS_CONTAINER=1
+            ;;
+        open|open-workbench)
+            OPEN_WORKBENCH=1
+            ;;
+        open-gadmin)
+            OPEN_GADMIN=1
+            ;;
+        open-reveal)
+            OPEN_REVEAL=1
+            ;;
+        alter-password)
+            ALTER_PASSWORD=1
+            ;;
+        self-test)
+            SELF_TEST=1
+            ;;
+
+        --gpu)
+            DOCKER_IMAGE_REPO="$GPU_DOCKER_IMAGE_REPO"
+            DOCKER_IMAGE="$DOCKER_IMAGE_REPO:$DOCKER_IMAGE_TAG"
+            DOCKER_RUN_ARGS+=" --runtime=nvidia"
+            if ! NVIDIA_SMI_OUT=$(nvidia-smi 2>&1); then
+                echo "Error: Unable to run the 'nvidia-smi' executable. Is the nvidia driver installed?"
+                echo "       Note that only the nvidia driver is required, not cuda."
+                echo "$NVIDIA_SMI_OUT"
+                exit_func 1
+            fi
+            if ! NVIDIA_DOCKER_OUT=$(nvidia-container-toolkit -version 2>&1); then
+                echo "Error: Unable to run the 'nvidia-container-toolkit' executable. Is the nvidia docker container toolkit installed?"
+                echo "       https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html"
+                echo "$NVIDIA_DOCKER_OUT"
+                exit_func 1
+            fi
+            ;;
+        --version)
+            DOCKER_IMAGE_TAG="$1"
+            VERSION_SPECIFIED=1
+            shift
+            if [ -z "$DOCKER_IMAGE_TAG" ] ; then
+                echo "Error: Must specify a valid --version to run Kinetica, exiting."
+                exit_func 1
+            fi
+
+            check_docker
+            IS_LOCAL=$($DOCKER_PROGRAM images "$DOCKER_IMAGE_REPO:$DOCKER_IMAGE_TAG")
+            if [ -z "$IS_LOCAL" ] ; then
+                get_registry_tags
+            fi
+            if [ -z "$IS_LOCAL" ] && ! echo "$REGISTRY_TAG_LIST" | grep -q "$DOCKER_IMAGE_TAG" ; then
+                echo "$REGISTRY_TAG_LIST"
+
+                echo "Error: Must specify a valid --version to run Kinetica, exiting."
+                exit_func 1
+            fi
+            DOCKER_IMAGE="$DOCKER_IMAGE_REPO:$DOCKER_IMAGE_TAG"
+            ;;
+        -i|--image)
+            DOCKER_IMAGE="${1:-}"
+            shift
+            if [ -z "$DOCKER_IMAGE" ]; then
+                echo "Error: Must specify --image NAME to run the container, exiting."
+                exit_func 1
+            fi
+            DOCKER_IMAGE_REPO=$(echo "$DOCKER_IMAGE" | awk -F: '{print $1}')
+            DOCKER_IMAGE_TAG=$(echo "$DOCKER_IMAGE" | awk -F: '{print $2}')
+            ;;
+        -c|--container)
+            CONTAINER_NAME="$1"
+            shift
+            ;;
+        -p|--persist)
+            PERSIST_DIR_SPECIFIED=1
+            # Validated before use
+            HOST_PERSIST_DIRECTORY="$1"
+            shift
+            ;;
+
+        --docker-run-args)
+            DOCKER_RUN_ARGS+=" $1"
+            shift
+            ;;
+
+        --database-port)
+            DATABASE_PORT="$1"
+            shift
+            ;;
+        --gadmin-port)
+            GADMIN_PORT="$1"
+            shift
+            ;;
+        --reveal-port)
+            REVEAL_PORT="$1"
+            shift
+            ;;
+        --postgres-port)
+            POSTGRES_PORT="$1"
+            shift
+            ;;
+        --workbench-port)
+            WORKBENCH_PORT="$1"
+            shift
+            ;;
+        --listen-address)
+            LISTEN_ADDRESS="$1"
+            shift
+            ;;
+        --uid)
+            if ! [ "${1:-}" -eq "${1:-}" ] 2> /dev/null; then
+                echo "Invalid value '${1:-}' to --uid, expected a user id number."
+                exit 1
+            fi
+            KINETICA_USER_UID="$1"
+            KINETICA_USER_UID_ARG="$1"
+            shift
+            ;;
+        --gid)
+            if ! [ "${1:-}" -eq "${1:-}" ] 2> /dev/null; then
+                echo "Invalid value '${1:-}' to --gid, expected a group id number."
+                exit 1
+            fi
+            KINETICA_USER_GID="$1"
+            KINETICA_USER_GID_ARG="$1"
+            shift
+            ;;
+        --conf)
+            GPUDB_CONF_UPDATES+=("$1")
+            shift
+            ;;
+
+        --network)
+            DOCKER_NETWORK+=" --network=$1"
+            shift
+            ;;
+        --port)
+            PORT_MAP="$1" # Arbitrary port mapping, specify "80:8080" for docker -p arg.
+            shift
+
+            if ! echo "$PORT_MAP" | grep -E "[0-9]+:[0-9]+$" >  /dev/null ; then
+                echo "Error: Bad --port '$PORT_MAP' arg, expected HOST:PORT, see help."
+                exit_func 1
+            fi
+
+            DOCKER_PORTS+=" -p $PORT_MAP"
+            ;;
+        --bind-host-ips)
+            BIND_IP_DEV="$1"
+            BIND_IP_ADDRESS="$2"
+            shift; shift
+
+            if ! ifconfig | grep "^$BIND_IP_DEV:" > /dev/null; then
+                echo "Error: Bad dev for --bind-host-ips '$BIND_IP_DEV', expected device from 'ifconfig'."
+                exit_func 1
+            fi
+            ;;
+
+        show-versions)
+            check_docker && get_registry_tags || RET=$?
+            echo "Available registry versions for $DOCKER_IMAGE_REPO"
+            echo "$REGISTRY_TAG_LIST" | sort -Vr | sed 's/^/  /g'
+
+            LOCAL_IMAGES=$($DOCKER_PROGRAM images -a "$DOCKER_IMAGE_REPO" | grep -F "$DOCKER_IMAGE_REPO")
+            echo "Local images :"
+            echo "$LOCAL_IMAGES" | sed 's/^/  /g' | grep -v " latest "
+            exit_func $RET
+            ;;
+        check-upgrade)
+            check_docker || exit_func $?
+            check_upgrade || exit_func $?
+            exit_func
+            ;;
+        -v|--verbose)
+            VERBOSE=$(( VERBOSE + 1 ))
+            ;;
+        help|-h|--help)
+            show_help
+            exit_func 0
+            ;;
+        *)
+            echo "Unknown arg '$key', use '-h' for help."
+            exit_func 1
+            ;;
+    esac
+done
+
+# ---------------------------------------------------------------------------
+# Validate args
+
+DOCKER_PORTS+=" -p $LISTEN_ADDRESS:$GADMIN_PORT:8080 -p $LISTEN_ADDRESS:$REVEAL_PORT:8088 \
+-p $LISTEN_ADDRESS:$DATABASE_PORT:9191 -p $LISTEN_ADDRESS:$POSTGRES_PORT:5432 -p $LISTEN_ADDRESS:$WORKBENCH_PORT:8000"
+
+LATEST_REGISTRY_TAG_VERSION="$DOCKER_IMAGE_TAG"
+LATEST_DOCKER_IMAGE="$DOCKER_IMAGE_REPO:$LATEST_REGISTRY_TAG_VERSION"
+
+DOCKER_HOST_NAME=$(echo "$CONTAINER_NAME" | sed 's/[^a-zA-Z0-9\-]/-/g')
+
+# ---------------------------------------------------------------------------
+# main()
+
+# ---------------------------------------------------------------------------
+# Commands are handled in order to allow stop/kill/rm/clean and then start
+
+[ "$VERBOSE" -gt 2 ] && set -x
+
+# Default action
+if [ $NUMBER_OF_ARGS -eq 0 ]; then
+    if which whiptail > /dev/null; then
+        show_menu || true
+        exit_func 0
+    else
+        show_help
+        exit_func 0
+    fi
+fi
+
+# Docker must work from now on
+check_docker
+
+# Validated in functions that use it
+HOST_PERSIST_DIRECTORY=$(readlinkf "$HOST_PERSIST_DIRECTORY")
+# Set persist to an already created container's value for start, clear, and update functions.
+if [ $PERSIST_DIR_SPECIFIED -eq 0 ] && is_created ; then
+    HOST_PERSIST_DIRECTORY="$LABEL_PERSIST_DIR"
+fi
+
+INSTALL_INFO_FILE="$HOST_PERSIST_DIRECTORY/$PERSIST_SUBDIR/install_info.ini"
+
+# ---------------------------------------------------------------------------
+
+# Stop first to exit gracefully
+if [ $STOP_CONTAINER -eq 1 ]; then
+    run stop_container || exit_func $?
+fi
+
+if [ $KILL_CONTAINER -eq 1 ]; then
+    run kill_container || exit_func $?
+fi
+
+if [ $CLEAR_PERSIST -eq 1 ]; then
+    run clear_persist || exit_func $?
+fi
+
+if [ $RM_CONTAINER -eq 1 ]; then
+    run_quiet kill_container || exit_func $?
+    run rm_container || exit_func $?
+fi
+
+if [ $UNINSTALL_CONTAINER -eq 1 ]; then
+    run uninstall_container || exit_func $?
+fi
+
+if [ $UPGRADE_CONTAINER -eq 1 ] ; then
+    run upgrade_container || exit_func $?
+fi
+
+if [ $INSTALL_CONTAINER -eq 1 ] ; then
+    run install_container "check_update" || exit_func $?
+fi
+
+# alter_password also called at the end of install_container the first time.
+if [ $ALTER_PASSWORD -eq 1 ]; then
+    run alter_password || exit_func $?
+fi
+
+if [ $START_CONTAINER -eq 1 ]; then
+    run install_container || exit_func $?
+    run start_container || exit_func $?
+    run is_running wait-for-running || exit_func $?
+    run status_container
+fi
+
+if [ $OPEN_WORKBENCH -eq 1 ]; then
+    run open_workbench
+fi
+if [ $OPEN_GADMIN -eq 1 ]; then
+    run open_gadmin
+fi
+if [ $OPEN_REVEAL -eq 1 ]; then
+    run open_reveal
+fi
+
+if [ $SELF_TEST -eq 1 ]; then
+    run self_test
+fi
+
+if [ $STATUS_CONTAINER -eq 1 ]; then
+    run status_container || exit_func $?
+fi
+
+exit_func

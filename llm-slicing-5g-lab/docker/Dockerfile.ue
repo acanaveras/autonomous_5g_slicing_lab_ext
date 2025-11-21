@@ -1,0 +1,72 @@
+# SPDX-FileCopyrightText: Copyright (c) 2023-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Dockerfile for OpenAirInterface UE (User Equipment)
+# Reuses the gNodeB builder stage for efficiency
+#
+#---------------------------------------------------------------------
+# TARGET IMAGE
+#---------------------------------------------------------------------
+ARG BASE_IMAGE=ubuntu:22.04
+
+FROM $BASE_IMAGE AS oai-ue
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe/Paris
+
+# Install runtime dependencies only
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes && \
+    DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+       libsctp1 \
+       libconfig9 \
+       libconfig++9v5 \
+       libatlas3-base \
+       liblapacke \
+       libboost-chrono1.74.0 \
+       libboost-date-time1.74.0 \
+       libboost-filesystem1.74.0 \
+       libboost-program-options1.74.0 \
+       libboost-regex1.74.0 \
+       libboost-serialization1.74.0 \
+       libboost-system1.74.0 \
+       libboost-thread1.74.0 \
+       libusb-1.0-0 \
+       libuhd4.1.0 \
+       net-tools \
+       iproute2 \
+       iputils-ping \
+       iperf3 \
+       procps \
+       python3 \
+       python3-six \
+       python3-requests \
+       coreutils && \
+    apt-get autoremove -y && \
+    apt-get autoclean -y
+
+WORKDIR /opt/oai-ue
+
+# Copy UE binary from local build (already exists from gNodeB build)
+# We'll copy from host filesystem to avoid rebuilding
+COPY openairinterface5g/cmake_targets/ran_build/build/nr-uesoftmodem /opt/oai-ue/bin/nr-uesoftmodem
+
+# Copy required shared libraries
+COPY openairinterface5g/cmake_targets/ran_build/build/*.so /usr/local/lib/
+
+# Update library cache and verify dependencies
+RUN ldconfig && \
+    echo "--- Verifying nr-uesoftmodem dependencies ---" && \
+    ldd /opt/oai-ue/bin/nr-uesoftmodem
+
+# Create necessary directories
+RUN mkdir -p /opt/oai-ue/etc && \
+    mkdir -p /opt/oai-ue/logs
+
+# Set LD_LIBRARY_PATH
+ENV LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
+
+WORKDIR /opt/oai-ue
+
+# Default command (will be overridden by docker-compose)
+CMD ["/opt/oai-ue/bin/nr-uesoftmodem"]

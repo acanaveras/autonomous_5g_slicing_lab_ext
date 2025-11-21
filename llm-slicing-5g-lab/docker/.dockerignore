@@ -1,0 +1,47 @@
+# Git directories
+.git
+.gitignore
+.gitmodules
+
+# Logs
+logs/
+*.log
+
+# Build artifacts (we're building from scratch)
+build/
+cmake_targets/ran_build/
+*.o
+*.so
+*.a
+
+# Documentation
+*.md
+docs/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+
+# Database files
+*.db
+*.sql
+kinetica-data/
+
+# Docker files (not needed in build)
+docker-compose*.yaml
+Dockerfile*
+.dockerignore
+
+# Temporary files
+tmp/
+temp/
+*.tmp

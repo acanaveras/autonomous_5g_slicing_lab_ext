@@ -1,4 +1,3 @@
-version: '2.3'
 services:
     mysql:
         container_name: "mysql"
@@ -193,10 +192,5 @@ services:
 
 networks:
     public_net:
-        driver: bridge
+        external: true
         name: demo-oai-public-net
-        ipam:
-            config:
-                - subnet: 192.168.70.0/24
-        driver_opts:
-            com.docker.network.bridge.name: "demo-oai"
