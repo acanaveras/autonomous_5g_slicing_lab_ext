@@ -99,11 +99,11 @@ def get_packetloss_logs() -> str:
     logging.info(f"This is get_packetloss_logs Tool \n")
     logging.info("\nRetrieving packet loss logs from database\n")
     time.sleep(5) # wait for db to get updated
-    iperf_random_table_name: str = os.environ.get('IPERF3_RANDOM_TABLE_NAME')
+    iperf_random_table_name: str = os.getenv('IPERF3_RANDOM_TABLE_NAME')
     # Just to be sure we have the latest randomly generated table name
     load_dotenv(find_dotenv())
         
-    sql_query = f"SELECT lost_packets, loss_percentage, UE FROM {os.environ.get('IPERF3_RANDOM_TABLE_NAME')} ORDER BY timestamp DESC LIMIT 20;"
+    sql_query = f"SELECT lost_packets, loss_percentage, UE FROM {os.getenv('IPERF3_RANDOM_TABLE_NAME')} ORDER BY timestamp DESC LIMIT 20;"
     result_df: pd.DataFrame = kdbc.to_df(
         sql=sql_query
     )

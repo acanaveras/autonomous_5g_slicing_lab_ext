@@ -78,8 +78,7 @@ if "KINETICA_PASSWORD" not in os.environ:
 if "KINETICA_SCHEMA" not in os.environ:
     os.environ["KINETICA_SCHEMA"] = "nvidia_gtc_dli_2025"
 
-# Fixed table name - no more environment variable issues!
-FIXED_TABLE_NAME = "nvidia_gtc_dli_2025.iperf3_logs"
+IPERF_TABLE_NAME = os.getenv('IPERF3_RANDOM_TABLE_NAME')
 
 # Connect to Kinetica (optional - will continue without it)
 kdbc = None
@@ -100,7 +99,7 @@ except Exception as e:
 def generate_sql_query(ue: str, table_name: str = None):
     # Use fixed table name if no specific table name provided
     if table_name is None:
-        table_name = FIXED_TABLE_NAME
+        table_name = IPERF_TABLE_NAME
     
     return f"""
             SELECT
