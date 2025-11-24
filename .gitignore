@@ -10,3 +10,13 @@ GenerativeAIExamples/
 agentic-llm/grafana_data/
 llm-slicing-5g-lab/kinetica-data/
 *.db
+
+
+# Compiled binaries and libraries
+*.so
+*.o
+*.a
+*.so.*
+*.dylib
+*.dll
+*.exe

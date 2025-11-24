@@ -28,12 +28,14 @@ import os
 import signal
 import yaml
 from gpudb import GPUdb
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 import json
 import logging
 import colorlog
 from influxdb_utils import InfluxDBMetricsClient
 
+# Load environment variables for NVIDIA API key
+load_dotenv(find_dotenv())
 
 # Configure colored logging.
 handler = colorlog.StreamHandler()
@@ -56,7 +58,11 @@ logger.propagate = False
 # Configuration: Paths for both log files
 config_file =  yaml.safe_load(open('config.yaml', 'r'))
 AGENT_LOG_FILE = config_file['AGENT_LOG_FILE']
-GRAPHANA_DASHBOARD = config_file['GRAPHANA_DASHBOARD']
+GRAPHANA_DASHBOARD = os.getenv('GRAFANA_DASHBOARD_ID', '')
+
+logger.info(f"__________________Grafana Dashboard ID: {GRAPHANA_DASHBOARD}")
+
+
 os.makedirs(os.path.dirname(AGENT_LOG_FILE), exist_ok=True)
 
 # Create the file if it doesn't exist
@@ -78,8 +84,7 @@ if "KINETICA_PASSWORD" not in os.environ:
 if "KINETICA_SCHEMA" not in os.environ:
     os.environ["KINETICA_SCHEMA"] = "nvidia_gtc_dli_2025"
 
-# Fixed table name - no more environment variable issues!
-FIXED_TABLE_NAME = "nvidia_gtc_dli_2025.iperf3_logs"
+IPERF_TABLE_NAME = os.getenv('IPERF3_RANDOM_TABLE_NAME')
 
 # Connect to Kinetica (optional - will continue without it)
 kdbc = None
@@ -100,7 +105,7 @@ except Exception as e:
 def generate_sql_query(ue: str, table_name: str = None):
     # Use fixed table name if no specific table name provided
     if table_name is None:
-        table_name = FIXED_TABLE_NAME
+        table_name = IPERF_TABLE_NAME
     
     return f"""
             SELECT
@@ -157,8 +162,7 @@ def start():
     #Start Agent - AI agent now fully enabled with LangChain/LangGraph
     global process
     try:
-        # Load environment variables for NVIDIA API key
-        load_dotenv()
+
 
         logger.info("Starting LangGraph AI Agent...")
         process = subprocess.Popen(
@@ -192,7 +196,7 @@ def get_cutoff_time() -> str:
 
 def get_grafana_dashboard_url():
     """Get the Grafana dashboard URL for embedding (cloud version)"""
-    return f"https://9002-{GRAPHANA_DASHBOARD}.brevlab.com/d/5g-metrics/5g-network-metrics-dashboard?orgId=1&refresh=5s&theme=dark"
+    return f"https://9002-{GRAPHANA_DASHBOARD}.brevlab.com/d/5g-metrics/5g-network-metrics-dashboard?orgId=1&from=now-5m&to=now&timezone=browser&refresh=5s"
 
 st.set_page_config(page_title="Real-Time Packet Loss & Transfer Rate",  layout="wide")
 st.title("5G-Network Configuration Agent")
