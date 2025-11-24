@@ -34,6 +34,8 @@ import logging
 import colorlog
 from influxdb_utils import InfluxDBMetricsClient
 
+# Load environment variables for NVIDIA API key
+load_dotenv(find_dotenv())
 
 # Configure colored logging.
 handler = colorlog.StreamHandler()
@@ -156,8 +158,7 @@ def start():
     #Start Agent - AI agent now fully enabled with LangChain/LangGraph
     global process
     try:
-        # Load environment variables for NVIDIA API key
-        load_dotenv(find_dotenv())
+
 
         logger.info("Starting LangGraph AI Agent...")
         process = subprocess.Popen(
