@@ -60,7 +60,8 @@ config_file =  yaml.safe_load(open('config.yaml', 'r'))
 AGENT_LOG_FILE = config_file['AGENT_LOG_FILE']
 GRAPHANA_DASHBOARD = os.getenv('GRAFANA_DASHBOARD_ID', '')
 
-logger.info("________________Grafana Dashboard ID: ", GRAPHANA_DASHBOARD)
+logger.info(f"__________________Grafana Dashboard ID: {GRAPHANA_DASHBOARD}")
+
 
 os.makedirs(os.path.dirname(AGENT_LOG_FILE), exist_ok=True)
 
