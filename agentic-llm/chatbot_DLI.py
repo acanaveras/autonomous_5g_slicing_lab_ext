@@ -191,7 +191,7 @@ def get_cutoff_time() -> str:
 
 def get_grafana_dashboard_url():
     """Get the Grafana dashboard URL for embedding (cloud version)"""
-    return f"https://9002-{GRAPHANA_DASHBOARD}.brevlab.com/d/5g-metrics/5g-network-metrics-dashboard?orgId=1&refresh=5s&theme=dark"
+    return f"https://9002-{GRAPHANA_DASHBOARD}.brevlab.com/d/5g-metrics/5g-network-metrics-dashboard?orgId=1&from=now-5m&to=now&timezone=browser&refresh=5s"
 
 st.set_page_config(page_title="Real-Time Packet Loss & Transfer Rate",  layout="wide")
 st.title("5G-Network Configuration Agent")
