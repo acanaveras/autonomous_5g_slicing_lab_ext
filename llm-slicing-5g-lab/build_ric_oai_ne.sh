@@ -43,10 +43,10 @@ if [ ! -f "/opt/asn1c/bin/asn1c" ]; then
     # Clean any previous attempts
     sudo rm -rf /tmp/asn1c
 
-    # Clone and build
-    git clone https://github.com/mouse07410/asn1c /tmp/asn1c
+    # Clone OAI-compatible ASN.1 compiler (velichkov, NOT mouse07410 which has E1AP bugs)
+    git clone https://github.com/velichkov/asn1c /tmp/asn1c
     cd /tmp/asn1c
-    git checkout vlm_master
+    git checkout s1ap
     git log -n1
 
     autoreconf -iv
@@ -103,24 +103,6 @@ if [ -d "openairinterface5g" ]; then
         git checkout slicing-spring-of-code
     fi
 else
-    git clone https://gitlab.eurecom.fr/oai/openairinterface5g
-    cd openairinterface5g || { echo "Failed to enter openairinterface5g directory"; exit 1; }
-    git checkout slicing-spring-of-code
-fi
-cd cmake_targets || { echo "Failed to enter cmake_targets"; exit 1; }
-
-# Build openairinterface5g
-# Install remaining OAI dependencies (excluding ASN1C and SIMDE which we already installed)
-echo ">>> Installing remaining OAI dependencies..."
-./build_oai -I || echo "WARNING: Some OAI dependencies may have failed, but ASN1C/SIMDE are installed"
-
-echo ">>> Building OAI gNB and nrUE (this will take 30-45 minutes)..."
-./build_oai -c -C -w SIMU --gNB --nrUE --build-e2 --ninja || { echo "Failed to build OAI"; exit 1; }
-
-# Step 2: Go back to the initial directory
-cd "$INITIAL_DIR" || { echo "Failed to return to initial directory"; exit 1; }
-
-# Step 3: Clone and build flexric
 echo ">>> Cloning and building flexric..."
 
 # Handle existing directory
