@@ -135,8 +135,8 @@ if [ -f "flexric/build/examples/ric/nearRT-RIC" ] && [ -f "openairinterface5g/cm
     log_success "RIC and OAI already built, skipping..."
 else
     log "Building RIC and OAI Network Elements (this may take 30-60 minutes)..."
-    chmod +x build_ric_oai_ne.sh
-    ./build_ric_oai_ne.sh 2>&1 | tee -a "$LOG_FILE"
+    chmod +x build_ric_oai.sh
+    ./build_ric_oai.sh 2>&1 | tee -a "$LOG_FILE"
     if [ ${PIPESTATUS[0]} -eq 0 ]; then
         log_success "RIC and OAI Network Elements built successfully"
     else
