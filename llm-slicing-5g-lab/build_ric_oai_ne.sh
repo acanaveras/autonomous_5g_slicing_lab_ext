@@ -29,25 +29,8 @@ sudo apt install -y gcc-12 g++-12 autoconf automake libtool bison flex
 sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100
 sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
 
-# Step 0.1: Clone and install custom asn1c compiler
-echo ">>> Installing custom asn1c compiler with hyphen-to-underscore fix..."
-cd "$INITIAL_DIR" || { echo "Failed to return to initial directory"; exit 1; }
-git clone https://gitlab.eurecom.fr/oai/asn1c.git
-cd asn1c || { echo "Failed to enter asn1c directory"; exit 1; }
-git checkout velichkov_s1ap_plus_option_group
-
-# Configure and compile
-autoreconf -iv
-./configure
-make -j$(nproc)
-
-./configure --prefix=/opt/asn1c
-make -j$(nproc)
-sudo make install
-echo ">>> Custom asn1c installed successfully!"
-
-# Go back to initial directory
-cd "$INITIAL_DIR" || { echo "Failed to return to initial directory"; exit 1; }
+# Step 0.1: Skip manual asn1c installation - let build_oai install the correct version
+echo ">>> asn1c will be installed by build_oai -I..."
 
 # Step 1: Clone and build openairinterface5g
 echo ">>> Cloning and building openairinterface5g..."
@@ -57,7 +40,10 @@ git checkout slicing-spring-of-code
 cd cmake_targets || { echo "Failed to enter cmake_targets"; exit 1; }
 
 # Build openairinterface5g
-# ./build_oai -I --> to avoid external dependencies
+# First install dependencies (including correct asn1c version)
+./build_oai -I
+
+# Then build OAI
 ./build_oai -c -C -w SIMU --gNB --nrUE --build-e2 --ninja
 
 # Step 2: Go back to the initial directory
