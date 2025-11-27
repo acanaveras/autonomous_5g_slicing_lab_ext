@@ -35,10 +35,11 @@ sudo rm -rf /opt/asn1c
 sudo rm -rf "$INITIAL_DIR/asn1c"
 
 # Step 0.2: Install asn1c with hyphen-to-underscore fix
-echo ">>> Installing asn1c with hyphen-to-underscore fix..."
+echo ">>> Installing asn1c with encoding fixes from OAI gitlab..."
 cd "$INITIAL_DIR" || { echo "Failed to return to initial directory"; exit 1; }
 git clone https://gitlab.eurecom.fr/oai/asn1c.git
 cd asn1c || { echo "Failed to enter asn1c directory"; exit 1; }
+git checkout velichkov_s1ap_plus_option_group
 
 # Build and install asn1c
 test -f configure || autoreconf -iv
