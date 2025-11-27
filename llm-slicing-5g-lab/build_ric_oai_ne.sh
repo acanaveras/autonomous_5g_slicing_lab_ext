@@ -57,7 +57,7 @@ git checkout slicing-spring-of-code
 cd cmake_targets || { echo "Failed to enter cmake_targets"; exit 1; }
 
 # Build openairinterface5g
-./build_oai -I
+# ./build_oai -I --> to avoid external dependencies
 ./build_oai -c -C -w SIMU --gNB --nrUE --build-e2 --ninja
 
 # Step 2: Go back to the initial directory
