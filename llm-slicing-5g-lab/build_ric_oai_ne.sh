@@ -29,25 +29,6 @@ sudo apt install -y gcc-12 g++-12 autoconf automake libtool bison flex
 sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100
 sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
 
-# Step 0.1: Remove old incompatible asn1c installation
-echo ">>> Removing old asn1c installation..."
-sudo rm -rf /opt/asn1c
-sudo rm -rf "$INITIAL_DIR/asn1c"
-
-# Step 0.2: Install asn1c with hyphen-to-underscore fix
-echo ">>> Installing asn1c with encoding fixes from OAI gitlab..."
-cd "$INITIAL_DIR" || { echo "Failed to return to initial directory"; exit 1; }
-git clone https://gitlab.eurecom.fr/oai/asn1c.git
-cd asn1c || { echo "Failed to enter asn1c directory"; exit 1; }
-git checkout velichkov_s1ap_plus_option_group
-
-# Build and install asn1c
-test -f configure || autoreconf -iv
-./configure --prefix=/opt/asn1c
-make -j$(nproc)
-sudo make install
-echo ">>> Custom asn1c with hyphen-to-underscore fix installed successfully!"
-
 # Go back to initial directory
 cd "$INITIAL_DIR" || { echo "Failed to return to initial directory"; exit 1; }
 
