@@ -34,10 +34,10 @@ echo ">>> Removing old asn1c installation..."
 sudo rm -rf /opt/asn1c
 sudo rm -rf "$INITIAL_DIR/asn1c"
 
-# Step 0.2: Install asn1c from OPENAIRINTERFACE repository
-echo ">>> Installing asn1c from OPENAIRINTERFACE repository..."
+# Step 0.2: Install asn1c with hyphen-to-underscore fix
+echo ">>> Installing asn1c with hyphen-to-underscore fix..."
 cd "$INITIAL_DIR" || { echo "Failed to return to initial directory"; exit 1; }
-git clone https://github.com/OPENAIRINTERFACE/asn1c.git
+git clone https://gitlab.eurecom.fr/oai/asn1c.git
 cd asn1c || { echo "Failed to enter asn1c directory"; exit 1; }
 
 # Build and install asn1c
@@ -45,7 +45,7 @@ test -f configure || autoreconf -iv
 ./configure --prefix=/opt/asn1c
 make -j$(nproc)
 sudo make install
-echo ">>> OPENAIRINTERFACE asn1c installed successfully!"
+echo ">>> Custom asn1c with hyphen-to-underscore fix installed successfully!"
 
 # Go back to initial directory
 cd "$INITIAL_DIR" || { echo "Failed to return to initial directory"; exit 1; }
