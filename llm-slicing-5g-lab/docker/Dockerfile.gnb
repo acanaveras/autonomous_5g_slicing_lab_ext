@@ -48,9 +48,39 @@ RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
 
 #---------------------------------------------------------------------
+# BUILD CUSTOM ASN1C COMPILER
+#---------------------------------------------------------------------
+FROM gnb-base AS asn1c-builder
+
+WORKDIR /workspace
+
+# Install asn1c build dependencies
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+       autoconf \
+       automake \
+       libtool \
+       bison \
+       flex && \
+    apt-get clean
+
+# Clone and build custom asn1c with hyphen-to-underscore fix
+RUN git clone https://github.com/Nouman64-cat/asn1c.git && \
+    cd asn1c && \
+    autoreconf -iv && \
+    ./configure && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig
+
+#---------------------------------------------------------------------
 # BUILD OPENAIRINTERFACE
 #---------------------------------------------------------------------
 FROM gnb-base AS gnb-builder
+
+# Copy custom asn1c from previous stage
+COPY --from=asn1c-builder /usr/local/bin/asn1c /usr/local/bin/asn1c
+COPY --from=asn1c-builder /usr/local/share/asn1c /usr/local/share/asn1c
 
 WORKDIR /workspace
 

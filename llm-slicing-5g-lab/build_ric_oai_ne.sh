@@ -21,18 +21,34 @@ set -e  # Exit immediately if any command fails
 # Save the initial directory
 INITIAL_DIR=$(pwd)
 
-# Step 0: Install necessary compilers (gcc-12, g++-12)
-echo ">>> Updating apt and installing gcc-12, g++-12..."
+
+# Step 0: Install necessary compilers and build tools (gcc-12, g++-12, asn1c dependencies)
+echo ">>> Updating apt and installing build dependencies..."
 sudo apt update
-sudo apt install -y gcc-12 g++-12
+sudo apt install -y gcc-12 g++-12 autoconf automake libtool bison flex
 sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100
 sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
+
+# Step 0.1: Clone and install custom asn1c compiler
+echo ">>> Installing custom asn1c compiler with hyphen-to-underscore fix..."
+cd "$INITIAL_DIR" || { echo "Failed to return to initial directory"; exit 1; }
+git clone https://github.com/Nouman64-cat/asn1c.git
+cd asn1c || { echo "Failed to enter asn1c directory"; exit 1; }
+autoreconf -iv
+./configure
+make -j$(nproc)
+sudo make install
+sudo ldconfig
+echo ">>> Custom asn1c installed successfully!"
+
+# Go back to initial directory
+cd "$INITIAL_DIR" || { echo "Failed to return to initial directory"; exit 1; }
 
 # Step 1: Clone and build openairinterface5g
 echo ">>> Cloning and building openairinterface5g..."
 git clone https://gitlab.eurecom.fr/oai/openairinterface5g
 cd openairinterface5g || { echo "Failed to enter openairinterface5g directory"; exit 1; }
-git checkout develop
+git checkout slicing-spring-of-code
 cd cmake_targets || { echo "Failed to enter cmake_targets"; exit 1; }
 
 # Build openairinterface5g
@@ -46,7 +62,7 @@ cd "$INITIAL_DIR" || { echo "Failed to return to initial directory"; exit 1; }
 echo ">>> Cloning and building flexric..."
 git clone https://gitlab.eurecom.fr/mosaic5g/flexric
 cd flexric || { echo "Failed to enter flexric directory"; exit 1; }
-git checkout dev
+git checkout slicing-spring-of-code    
 
 # Step 4: Copy necessary files
 cp "$INITIAL_DIR/xapp_rc_slice_dynamic.c" examples/xApp/c/ctrl/ || { echo "Failed to copy xapp_rc_slice_dynamic.c"; exit 1; }
