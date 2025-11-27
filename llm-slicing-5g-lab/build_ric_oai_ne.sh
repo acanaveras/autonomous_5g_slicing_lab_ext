@@ -32,7 +32,7 @@ sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
 echo ">>> Cloning and building openairinterface5g..."
 git clone https://gitlab.eurecom.fr/oai/openairinterface5g
 cd openairinterface5g || { echo "Failed to enter openairinterface5g directory"; exit 1; }
-git checkout slicing-spring-of-code
+git checkout develop
 cd cmake_targets || { echo "Failed to enter cmake_targets"; exit 1; }
 
 # Build openairinterface5g
@@ -46,7 +46,7 @@ cd "$INITIAL_DIR" || { echo "Failed to return to initial directory"; exit 1; }
 echo ">>> Cloning and building flexric..."
 git clone https://gitlab.eurecom.fr/mosaic5g/flexric
 cd flexric || { echo "Failed to enter flexric directory"; exit 1; }
-git checkout slicing-spring-of-code
+git checkout dev
 
 # Step 4: Copy necessary files
 cp "$INITIAL_DIR/xapp_rc_slice_dynamic.c" examples/xApp/c/ctrl/ || { echo "Failed to copy xapp_rc_slice_dynamic.c"; exit 1; }
