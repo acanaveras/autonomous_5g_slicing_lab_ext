@@ -33,6 +33,7 @@ sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
 echo ">>> Installing custom asn1c compiler with hyphen-to-underscore fix..."
 cd "$INITIAL_DIR" || { echo "Failed to return to initial directory"; exit 1; }
 git clone https://gitlab.eurecom.fr/oai/asn1c.git
+cd asn1c || { echo "Failed to enter asn1c directory"; exit 1; }
 git checkout velichkov_s1ap_plus_option_group
 
 # Configure and compile
