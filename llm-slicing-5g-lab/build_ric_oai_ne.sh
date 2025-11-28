@@ -1,65 +1,61 @@
 #!/bin/bash
+# ... (keep your header/license)
 
-# SPDX-FileCopyrightText: Copyright (c) 2023-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-
-set -e  # Exit immediately if any command fails
-
-# Save the initial directory
+set -e
 INITIAL_DIR=$(pwd)
 
-
-# Step 0: Install necessary compilers and build tools (gcc-12, g++-12, asn1c dependencies)
+# Step 0: Install necessary compilers and build tools
 echo ">>> Updating apt and installing build dependencies..."
 sudo apt update
 sudo apt install -y gcc-12 g++-12 autoconf automake libtool bison flex
 sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100
 sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
 
-# Go back to initial directory
 cd "$INITIAL_DIR" || { echo "Failed to return to initial directory"; exit 1; }
 
-# Step 1: Clone and build openairinterface5g
-echo ">>> Cloning and building openairinterface5g..."
+# Step 1: Clone openairinterface5g
+echo ">>> Cloning openairinterface5g..."
 git clone https://gitlab.eurecom.fr/oai/openairinterface5g
 cd openairinterface5g || { echo "Failed to enter openairinterface5g directory"; exit 1; }
 git checkout slicing-spring-of-code
 cd cmake_targets || { echo "Failed to enter cmake_targets"; exit 1; }
 
-# Build openairinterface5g
-# Install remaining dependencies (asn1c already installed above)
+# Step 2: Install OAI dependencies (this installs the BUGGY asn1c)
+echo ">>> Installing OAI dependencies..."
 ./build_oai -I || echo "WARNING: Some dependencies may have failed, but continuing..."
 
-# Build OAI with explicit asn1c path
-./build_oai -c -C -w SIMU --gNB --nrUE --build-e2 --ninja
+# Step 3: REPLACE buggy asn1c with fixed version
+echo ">>> Replacing buggy asn1c with hyphen-fix version..."
+sudo rm -rf /opt/asn1c
+sudo rm -rf /tmp/asn1c
 
-# Step 2: Go back to the initial directory
+# Use OAI's own fork which has the fixes for their ASN.1 files
+git clone https://gitlab.eurecom.fr/oai/asn1c.git /tmp/asn1c
+cd /tmp/asn1c
+git checkout velichkov_s1ap_plus_option_group  # Branch with protocol-specific fixes
+autoreconf -iv
+./configure --prefix=/opt/asn1c
+make -j$(nproc)
+sudo make install
+sudo ldconfig
+
+cd "$INITIAL_DIR/openairinterface5g/cmake_targets" || exit 1
+
+# Step 4: Build OAI with the FIXED asn1c
+echo ">>> Building OAI..."
+./build_oai -c -C -w SIMU --gNB --nrUE --build-e2 --ninja --cmake-opt -DASN1C_EXEC=/opt/asn1c/bin/asn1c
+
+# Step 5: Go back and build flexric
 cd "$INITIAL_DIR" || { echo "Failed to return to initial directory"; exit 1; }
 
-# Step 3: Clone and build flexric
 echo ">>> Cloning and building flexric..."
 git clone https://gitlab.eurecom.fr/mosaic5g/flexric
 cd flexric || { echo "Failed to enter flexric directory"; exit 1; }
 git checkout slicing-spring-of-code    
 
-# Step 4: Copy necessary files
 cp "$INITIAL_DIR/xapp_rc_slice_dynamic.c" examples/xApp/c/ctrl/ || { echo "Failed to copy xapp_rc_slice_dynamic.c"; exit 1; }
 cp "$INITIAL_DIR/CMakeLists.txt" examples/xApp/c/ctrl/ || { echo "Failed to copy CMakeLists.txt"; exit 1; }
 
-# Step 5: Build flexric
 mkdir -p build && cd build
 cmake -DXAPP_MULTILANGUAGE=OFF ..
 make -j8
