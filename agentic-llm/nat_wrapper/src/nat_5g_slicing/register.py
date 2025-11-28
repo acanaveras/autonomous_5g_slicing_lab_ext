@@ -3,23 +3,51 @@
 
 """Register 5G network management tools as NAT function groups."""
 
-from collections.abc import AsyncGenerator
+import asyncio
+import logging
 import os
 import subprocess
-import time
-import logging
-from typing import Optional
+from collections.abc import AsyncGenerator
 
-import pandas as pd
 import gpudb
-from dotenv import load_dotenv, find_dotenv
-from pydantic import Field
+import pandas as pd
+from dotenv import find_dotenv, load_dotenv
+from pydantic import BaseModel, Field
 
 from nat.builder.builder import Builder
 from nat.builder.function import FunctionGroup
 from nat.cli.register_workflow import register_function_group
 from nat.data_models.function import FunctionGroupBaseConfig
 
+
+# =============================================================================
+# Input Models (NAT requires exactly one Pydantic model parameter per function)
+# =============================================================================
+
+class ReconfigureNetworkInput(BaseModel):
+    """Input schema for network reconfiguration."""
+    ue: str = Field(
+        description="User Equipment identifier (UE1 or UE3)"
+    )
+    value_1_old: int = Field(
+        description="Old bandwidth allocation value for slice 1"
+    )
+    value_2_old: int = Field(
+        description="Old bandwidth allocation value for slice 2"
+    )
+
+
+class GetPacketlossLogsInput(BaseModel):
+    """Input schema for packet loss log retrieval."""
+    limit: int = Field(
+        default=20,
+        description="Maximum number of log entries to retrieve"
+    )
+
+
+# =============================================================================
+# Configuration
+# =============================================================================
 
 class NetworkManagementToolsConfig(FunctionGroupBaseConfig, name="network_tools"):
     """Configuration for 5G network management tools."""
@@ -54,22 +82,17 @@ class NetworkManagementToolsConfig(FunctionGroupBaseConfig, name="network_tools"
     )
 
 
+# =============================================================================
+# Function Group Registration
+# =============================================================================
+
 @register_function_group(config_type=NetworkManagementToolsConfig)
 async def network_tools(
     config: NetworkManagementToolsConfig,
     _builder: Builder
 ) -> AsyncGenerator[FunctionGroup, None]:
-    """Create and register the 5G network management function group.
-
-    Args:
-        config: Network management tools configuration.
-        _builder: Workflow builder (unused).
-
-    Yields:
-        FunctionGroup: The configured network management function group with
-            reconfigure_network and get_packetloss_logs operations.
-    """
-    # Load environment variables
+    """Create and register the 5G network management function group."""
+    
     load_dotenv(find_dotenv())
     
     # Initialize Kinetica connection
@@ -85,28 +108,29 @@ async def network_tools(
     
     group = FunctionGroup(config=config)
 
-    async def _reconfigure_network(
-        ue: str,
-        value_1_old: int,
-        value_2_old: int
-    ) -> str:
+    # -------------------------------------------------------------------------
+    # Tool Functions (single Pydantic model input)
+    # -------------------------------------------------------------------------
+
+    async def _reconfigure_network(input: ReconfigureNetworkInput) -> str:
         """Reconfigure the 5G network bandwidth allocation.
         
         Args:
-            ue: User Equipment identifier (UE1 or UE3)
-            value_1_old: Old bandwidth allocation value for slice 1
-            value_2_old: Old bandwidth allocation value for slice 2
+            input: ReconfigureNetworkInput containing ue, value_1_old, value_2_old
             
         Returns:
             New configuration values as a string
         """
-        logging.info(f"Executing reconfigure_network with UE={ue}, value_1_old={value_1_old}, value_2_old={value_2_old}")
+        logging.info(
+            f"Executing reconfigure_network with UE={input.ue}, "
+            f"value_1_old={input.value_1_old}, value_2_old={input.value_2_old}"
+        )
         
         script_path = os.getenv("RECONFIG_SCRIPT_PATH", config.reconfig_script_path)
         args_1 = ["20", "20"]
         
         # Determine new allocation based on UE
-        if ue.upper() == "UE1":
+        if input.ue.upper() == "UE1":
             args_2 = ["80", "20"]
         else:
             args_2 = ["20", "80"]
@@ -130,7 +154,6 @@ async def network_tools(
             )
             logging.info(f"Script output args_2: {result.stdout}")
             
-            # Wait for reconfiguration to take effect
             await asyncio.sleep(10)
             logging.info("Reconfiguration complete, waiting for changes to take effect")
             
@@ -140,18 +163,19 @@ async def network_tools(
             logging.error(f"Reconfiguration failed: {e.stderr}")
             raise ValueError(f"Reconfiguration unsuccessful: {e.stderr}")
 
-    async def _get_packetloss_logs() -> str:
+    async def _get_packetloss_logs(input: GetPacketlossLogsInput) -> str:
         """Get packet loss logs from Kinetica database to determine which UE is failing.
         
+        Args:
+            input: GetPacketlossLogsInput containing limit for number of entries
+            
         Returns:
             Formatted string containing recent packet loss data for all UEs
         """
         logging.info("Retrieving packet loss logs from Kinetica database")
         
-        # Wait for database to update
         await asyncio.sleep(5)
         
-        # Reload environment to get latest table name
         load_dotenv(find_dotenv())
         table_name = os.getenv("IPERF3_RANDOM_TABLE_NAME", config.iperf_table_name)
         
@@ -159,7 +183,7 @@ async def network_tools(
             SELECT lost_packets, loss_percentage, UE 
             FROM {table_name} 
             ORDER BY timestamp DESC 
-            LIMIT 20;
+            LIMIT {input.limit};
         """
         
         try:
@@ -174,23 +198,22 @@ async def network_tools(
             logging.error(f"Failed to retrieve packet loss logs: {e}")
             raise ValueError(f"Failed to query Kinetica database: {e}")
 
-    # Register functions in the group
+    # -------------------------------------------------------------------------
+    # Register functions
+    # -------------------------------------------------------------------------
+    
     if "reconfigure_network" in config.include:
         group.add_function(
             name="reconfigure_network",
             fn=_reconfigure_network,
-            description=_reconfigure_network.__doc__
+            description="Reconfigure the 5G network bandwidth allocation for a specific UE"
         )
     
     if "get_packetloss_logs" in config.include:
         group.add_function(
             name="get_packetloss_logs",
             fn=_get_packetloss_logs,
-            description=_get_packetloss_logs.__doc__
+            description="Get packet loss logs from Kinetica database to determine which UE is failing"
         )
 
     yield group
-
-
-# Import asyncio for async operations
-import asyncio
