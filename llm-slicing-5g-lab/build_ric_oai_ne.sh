@@ -19,14 +19,16 @@
 # Build script for RIC and OAI Network Elements
 # 
 # This script builds OpenAirInterface5G and FlexRIC for the Autonomous 5G 
-# Slicing Lab. It includes a fix for the asn1c compiler issue where recent
-# versions of mouse07410/asn1c have a bug that doesn't properly convert
-# hyphens to underscores in ASN.1 enum identifiers (e.g., E1AP's 
-# "discard-pdpc-SN" becomes invalid C code).
+# Slicing Lab.
 #
-# The fix uses velichkov/asn1c (s1ap branch) which has both:
-#   - APER (Aligned PER) encoding support required by OAI
-#   - Proper hyphen-to-underscore conversion for enum identifiers
+# FIX APPLIED: Uses OAI's official asn1c fork (gitlab.eurecom.fr/oai/asn1c)
+# with the master.aper branch instead of mouse07410/asn1c which has a bug
+# in recent commits that breaks hyphen-to-underscore conversion in E1AP enums.
+#
+# The OAI asn1c fork provides:
+#   - APER (Aligned PER) encoding support required by 3GPP protocols
+#   - Proper handling of ASN.1 enum identifiers with hyphens
+#   - Specific modifications for OpenAirInterface RAN and CN
 # =============================================================================
 
 set -e  # Exit immediately if any command fails
@@ -70,13 +72,55 @@ sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
 
 log_success "Build dependencies installed"
 
-# Go back to initial directory
 cd "$INITIAL_DIR" || { log_error "Failed to return to initial directory"; exit 1; }
 
 # =============================================================================
-# Step 1: Clone OpenAirInterface5G
+# Step 1: Install OAI's official asn1c with APER support
+# Using gitlab.eurecom.fr/oai/asn1c branch master.aper
 # =============================================================================
-log "Step 1: Cloning OpenAirInterface5G..."
+log "Step 1: Installing OAI's official asn1c (master.aper branch)..."
+
+# Remove any existing asn1c installation
+sudo rm -rf /opt/asn1c
+sudo rm -rf /tmp/asn1c
+
+# Clone OAI's official asn1c fork with APER support
+log "Cloning gitlab.eurecom.fr/oai/asn1c (master.aper branch)..."
+git clone https://gitlab.eurecom.fr/oai/asn1c.git /tmp/asn1c
+cd /tmp/asn1c
+
+# Checkout the master.aper branch which has APER support
+git checkout master.aper
+
+# Show which version we're using
+log "asn1c branch and commit info:"
+git branch
+git log -n1 --oneline
+
+# Build asn1c
+log "Building asn1c..."
+autoreconf -iv
+./configure --prefix=/opt/asn1c
+make -j$(nproc)
+sudo make install
+sudo ldconfig
+
+# Verify installation
+if [ -f "/opt/asn1c/bin/asn1c" ]; then
+    log_success "asn1c installed at /opt/asn1c/bin/asn1c"
+    log "asn1c version:"
+    /opt/asn1c/bin/asn1c -h 2>&1 | head -5 || true
+else
+    log_error "asn1c installation failed!"
+    exit 1
+fi
+
+cd "$INITIAL_DIR"
+
+# =============================================================================
+# Step 2: Clone OpenAirInterface5G
+# =============================================================================
+log "Step 2: Cloning OpenAirInterface5G..."
 
 if [ -d "openairinterface5g" ]; then
     log_warning "openairinterface5g directory already exists, removing..."
@@ -91,56 +135,29 @@ log_success "OpenAirInterface5G cloned and checked out to slicing-spring-of-code
 cd cmake_targets || { log_error "Failed to enter cmake_targets"; exit 1; }
 
 # =============================================================================
-# Step 2: Install OAI dependencies (this installs the BUGGY asn1c)
+# Step 3: Install OAI dependencies (protect our asn1c from being overwritten)
 # =============================================================================
-log "Step 2: Installing OAI dependencies via build_oai -I..."
-log_warning "This will install mouse07410/asn1c which has a known bug - we will fix it next"
+log "Step 3: Installing OAI dependencies via build_oai -I..."
+log "Protecting our OAI asn1c installation from being overwritten..."
 
+# Temporarily move our good asn1c to prevent overwrite
+sudo mv /opt/asn1c /opt/asn1c_good
+
+# Run build_oai -I to install other dependencies
 ./build_oai -I || log_warning "Some dependencies may have failed, but continuing..."
 
-log_success "OAI dependencies installed"
-
-# =============================================================================
-# Step 3: CRITICAL FIX - Replace buggy asn1c with velichkov's fork
-# =============================================================================
-log "Step 3: Replacing buggy asn1c with velichkov/asn1c (s1ap branch)..."
-log "This fixes the hyphen-to-underscore bug in E1AP enum identifiers"
-
-# Remove the buggy asn1c installed by build_oai -I
+# Restore our good asn1c (overwrite whatever build_oai -I installed)
 sudo rm -rf /opt/asn1c
-sudo rm -rf /tmp/asn1c
+sudo mv /opt/asn1c_good /opt/asn1c
 
-# Clone velichkov's fork which has:
-# - APER support (required by OAI for 3GPP protocol encoding)
-# - Proper hyphen-to-underscore conversion for enum identifiers
-# - Fixes for S1AP, X2AP, NGAP, and E1AP protocol compilation
-git clone https://github.com/velichkov/asn1c.git /tmp/asn1c
-cd /tmp/asn1c
-git checkout s1ap
+log_success "OAI dependencies installed, OAI asn1c (master.aper) restored"
 
-log "Building asn1c from velichkov/asn1c (s1ap branch)..."
-autoreconf -iv
-./configure --prefix=/opt/asn1c
-make -j$(nproc)
-sudo make install
-sudo ldconfig
-
-# Verify installation
-if [ -f "/opt/asn1c/bin/asn1c" ]; then
-    log_success "asn1c installed successfully at /opt/asn1c/bin/asn1c"
-    # Show version info
-    log "asn1c version info:"
-    /opt/asn1c/bin/asn1c -h 2>&1 | head -5 || true
-else
-    log_error "asn1c installation failed!"
-    exit 1
-fi
-
-# Return to OAI cmake_targets directory
-cd "$INITIAL_DIR/openairinterface5g/cmake_targets" || { log_error "Failed to return to cmake_targets"; exit 1; }
+# Verify asn1c is still correct
+log "Verifying asn1c installation..."
+/opt/asn1c/bin/asn1c -h 2>&1 | head -3
 
 # =============================================================================
-# Step 4: Build OpenAirInterface5G with the fixed asn1c
+# Step 4: Build OpenAirInterface5G with the OAI asn1c
 # =============================================================================
 log "Step 4: Building OpenAirInterface5G (gNB, nrUE, E2 agent)..."
 log "This may take 30-60 minutes depending on your system..."
@@ -228,8 +245,8 @@ echo "  - nr-softmodem: $INITIAL_DIR/openairinterface5g/cmake_targets/ran_build/
 echo "  - nearRT-RIC:   $INITIAL_DIR/flexric/build/examples/ric/nearRT-RIC"
 echo ""
 echo "asn1c fix applied:"
-echo "  - Replaced buggy mouse07410/asn1c with velichkov/asn1c (s1ap branch)"
-echo "  - This fixes E1AP enum identifier compilation errors"
+echo "  - Using OAI's official asn1c: gitlab.eurecom.fr/oai/asn1c (master.aper branch)"
+echo "  - This provides APER support AND proper ASN.1 handling for OAI"
 echo ""
 echo "You can now run: cd docker && ./lab_start.sh"
 echo ""
