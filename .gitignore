@@ -20,3 +20,6 @@ llm-slicing-5g-lab/kinetica-data/
 *.dylib
 *.dll
 *.exe
+
+
+*.DS_Store
