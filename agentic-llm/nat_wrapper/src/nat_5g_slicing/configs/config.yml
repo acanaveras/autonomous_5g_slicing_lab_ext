@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# 5G Network Management Function Groups
+function_groups:
+  network_tools:
+    _type: network_tools
+    include:
+      - reconfigure_network
+      - get_packetloss_logs
+    kinetica_host: ${KINETICA_HOST:localhost:9191}
+    kinetica_username: ${KINETICA_USERNAME:admin}
+    kinetica_password: ${KINETICA_PASSWORD:admin}
+    kinetica_schema: ${KINETICA_SCHEMA:nvidia_gtc_dli_2025}
+    iperf_table_name: ${IPERF3_RANDOM_TABLE_NAME:nvidia_gtc_dli_2025.iperf3_logs}
+    reconfig_script_path: ${RECONFIG_SCRIPT_PATH:../llm-slicing-5g-lab/docker/change_rc_slice_docker.sh}
+
+# LLM Configuration
+llms:
+  nvidia_nim:
+    _type: nim
+    model_name: ${NVIDIA_AI_MODEL_NAME:meta/llama-3.1-70b-instruct}
+    temperature: 0.0
+    max_tokens: 2048
+    base_url: https://integrate.api.nvidia.com/v1
+
+# Workflow Configuration (ReAct Agent)
+workflow:
+  _type: react_agent
+  tool_names:
+    - network_tools
+  llm_name: nvidia_nim
+  verbose: true
+  parse_agent_response_max_retries: 3
+  max_iterations: 15

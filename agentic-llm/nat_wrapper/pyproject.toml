@@ -1,0 +1,29 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = ["setuptools >= 64", "setuptools-scm>=8"]
+
+[tool.setuptools_scm]
+git_describe_command = "git describe --long --first-parent"
+root = "../.."
+
+[project]
+name = "nat_5g_slicing"
+dynamic = ["version"]
+dependencies = [
+    "nvidia-nat[langchain]~=1.4",
+    "gpudb>=7.2.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
+    "langgraph>=0.2.0",
+    "langchain-nvidia-ai-endpoints>=0.3.0"
+]
+requires-python = ">=3.11,<3.14"
+description = "5G Network Slicing Agentic Workflow with NeMo Agent Toolkit"
+keywords = ["ai", "agents", "5g", "network-slicing"]
+classifiers = ["Programming Language :: Python"]
+
+[tool.uv.sources]
+nvidia-nat = { path = "../../..", editable = true }
+
+[project.entry-points.'nat.components']
+nat_5g_slicing = "nat_5g_slicing.register"
