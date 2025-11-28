@@ -44,7 +44,7 @@ cd cmake_targets || { echo "Failed to enter cmake_targets"; exit 1; }
 ./build_oai -I || echo "WARNING: Some dependencies may have failed, but continuing..."
 
 # Build OAI with explicit asn1c path
-./build_oai -c -C -w SIMU --gNB --nrUE --build-e2 --ninja --cmake-opt -DASN1C_EXEC=/opt/asn1c/bin/asn1c
+./build_oai -c -C -w SIMU --gNB --nrUE --build-e2 --ninja
 
 # Step 2: Go back to the initial directory
 cd "$INITIAL_DIR" || { echo "Failed to return to initial directory"; exit 1; }
