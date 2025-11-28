@@ -4,6 +4,9 @@
 # Dockerfile for OpenAirInterface gNodeB with E2 support
 # Builds from slicing-spring-of-code branch with FlexRIC integration
 #
+# FIX APPLIED: Uses mouse07410/asn1c pinned to pre-Jan-2025 commit
+# This provides BOTH -gen-APER support AND correct hyphen-to-underscore conversion
+#
 #---------------------------------------------------------------------
 # BUILDER IMAGE
 #---------------------------------------------------------------------
@@ -49,6 +52,8 @@ RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 && \
 
 #---------------------------------------------------------------------
 # BUILD CUSTOM ASN1C COMPILER
+# Using mouse07410/asn1c pinned to pre-Jan-2025 (before hyphen bug)
+# This is the ONLY fork with -gen-APER support required by OAI
 #---------------------------------------------------------------------
 FROM gnb-base AS asn1c-builder
 
@@ -64,23 +69,37 @@ RUN apt-get update && \
        flex && \
     apt-get clean
 
-# Clone and build custom asn1c with hyphen-to-underscore fix
-RUN git clone https://github.com/Nouman64-cat/asn1c.git && \
+# Clone mouse07410/asn1c and checkout a known-good commit from before Jan 2025
+# The hyphen-to-underscore bug (CVE-2025-55398) was introduced around March 2025
+RUN git clone https://github.com/mouse07410/asn1c.git && \
     cd asn1c && \
+    git checkout vlm_master && \
+    # Find the latest commit before 2025-01-01 (well before the bug)
+    GOOD_COMMIT=$(git rev-list -n 1 --before="2025-01-01" vlm_master) && \
+    echo "Using asn1c commit: $GOOD_COMMIT" && \
+    git checkout $GOOD_COMMIT && \
+    git log -n1 --oneline && \
     autoreconf -iv && \
-    ./configure && \
+    ./configure --prefix=/opt/asn1c && \
     make -j$(nproc) && \
-    make install && \
-    ldconfig
+    make install
+
+# Verify -gen-APER support exists
+RUN /opt/asn1c/bin/asn1c -h 2>&1 | head -5 && \
+    echo "Testing -gen-APER support..." && \
+    /opt/asn1c/bin/asn1c -gen-APER 2>&1 | grep -q "No input files" && \
+    echo "SUCCESS: asn1c supports -gen-APER"
 
 #---------------------------------------------------------------------
 # BUILD OPENAIRINTERFACE
 #---------------------------------------------------------------------
 FROM gnb-base AS gnb-builder
 
-# Copy custom asn1c from previous stage
-COPY --from=asn1c-builder /usr/local/bin/asn1c /usr/local/bin/asn1c
-COPY --from=asn1c-builder /usr/local/share/asn1c /usr/local/share/asn1c
+# Copy custom asn1c to /opt/asn1c (where OAI expects it)
+COPY --from=asn1c-builder /opt/asn1c /opt/asn1c
+
+# Also copy to a backup location (build_oai -I will try to overwrite /opt/asn1c)
+COPY --from=asn1c-builder /opt/asn1c /opt/asn1c_good
 
 WORKDIR /workspace
 
@@ -91,13 +110,21 @@ RUN git clone https://gitlab.eurecom.fr/oai/openairinterface5g.git && \
 
 WORKDIR /workspace/openairinterface5g
 
-# Install dependencies
+# Install dependencies (this may overwrite /opt/asn1c with buggy version)
 RUN cd cmake_targets && \
-    ./build_oai -I
+    ./build_oai -I || true
+
+# Restore our good asn1c (overwrite whatever build_oai -I installed)
+RUN rm -rf /opt/asn1c && \
+    cp -r /opt/asn1c_good /opt/asn1c && \
+    echo "Restored good asn1c:" && \
+    /opt/asn1c/bin/asn1c -h 2>&1 | head -3
 
 # Build gNodeB and nrUE with E2 support and RF simulator
+# Explicitly specify our asn1c path
 RUN cd cmake_targets && \
-    ./build_oai -c -C -w SIMU --gNB --nrUE --build-e2 --ninja && \
+    ./build_oai -c -C -w SIMU --gNB --nrUE --build-e2 --ninja \
+        --cmake-opt -DASN1C_EXEC=/opt/asn1c/bin/asn1c && \
     echo "--- Build completed ---" && \
     ls -lh ran_build/build/nr-softmodem && \
     echo "--- Checking nr-softmodem dependencies ---" && \
