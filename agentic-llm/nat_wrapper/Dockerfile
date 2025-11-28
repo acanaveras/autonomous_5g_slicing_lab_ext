@@ -21,7 +21,7 @@ WORKDIR /workspace
 COPY . /workspace/
 
 # Install NeMo Agent Toolkit (assuming it's in the repo or will be pip installed)
-RUN pip install --no-cache-dir nvidia-nat[langchain]~=1.4
+RUN pip install --no-cache-dir nvidia-nat[langchain]
 
 # Install this workflow package
 WORKDIR /workspace/agentic-llm/nat_wrapper
