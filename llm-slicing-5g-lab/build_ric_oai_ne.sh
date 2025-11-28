@@ -21,14 +21,13 @@
 # This script builds OpenAirInterface5G and FlexRIC for the Autonomous 5G 
 # Slicing Lab.
 #
-# FIX APPLIED: Uses OAI's official asn1c fork (gitlab.eurecom.fr/oai/asn1c)
-# with the master.aper branch instead of mouse07410/asn1c which has a bug
-# in recent commits that breaks hyphen-to-underscore conversion in E1AP enums.
+# FIX APPLIED: Uses mouse07410/asn1c pinned to a commit from BEFORE March 2025
+# when the hyphen-to-underscore bug (CVE-2025-55398) was introduced.
 #
-# The OAI asn1c fork provides:
-#   - APER (Aligned PER) encoding support required by 3GPP protocols
-#   - Proper handling of ASN.1 enum identifiers with hyphens
-#   - Specific modifications for OpenAirInterface RAN and CN
+# Why mouse07410/asn1c?
+#   - It's the ONLY fork with -gen-APER support (required by OAI)
+#   - OAI's own fork and velichkov's fork don't have -gen-APER
+#   - We just need to use an older commit before the bug
 # =============================================================================
 
 set -e  # Exit immediately if any command fails
@@ -75,27 +74,50 @@ log_success "Build dependencies installed"
 cd "$INITIAL_DIR" || { log_error "Failed to return to initial directory"; exit 1; }
 
 # =============================================================================
-# Step 1: Install OAI's official asn1c with APER support
-# Using gitlab.eurecom.fr/oai/asn1c branch master.aper
+# Step 1: Install mouse07410/asn1c pinned to pre-bug commit
+# The -gen-APER flag is ONLY available in mouse07410/asn1c
+# Bug CVE-2025-55398 was introduced around March 2025, so we use Jan 2025 commit
 # =============================================================================
-log "Step 1: Installing OAI's official asn1c (master.aper branch)..."
+log "Step 1: Installing mouse07410/asn1c (pinned to pre-March-2025 commit)..."
 
 # Remove any existing asn1c installation
 sudo rm -rf /opt/asn1c
 sudo rm -rf /tmp/asn1c
 
-# Clone OAI's official asn1c fork with APER support
-log "Cloning gitlab.eurecom.fr/oai/asn1c (master.aper branch)..."
-git clone https://gitlab.eurecom.fr/oai/asn1c.git /tmp/asn1c
+# Clone mouse07410/asn1c (the ONLY fork with -gen-APER support)
+log "Cloning mouse07410/asn1c..."
+git clone https://github.com/mouse07410/asn1c.git /tmp/asn1c
 cd /tmp/asn1c
 
-# Checkout the master.aper branch which has APER support
-git checkout master.aper
+# Checkout vlm_master branch
+git checkout vlm_master
+
+# Find a commit from before January 2025 (well before the March 2025 bug)
+log "Finding a stable commit from before the hyphen bug (pre-Jan 2025)..."
+GOOD_COMMIT=$(git rev-list -n 1 --before="2025-01-01" vlm_master)
+
+if [ -z "$GOOD_COMMIT" ]; then
+    log_warning "Could not find commit before 2025-01-01, trying 2024-11-01..."
+    GOOD_COMMIT=$(git rev-list -n 1 --before="2024-11-01" vlm_master)
+fi
+
+if [ -z "$GOOD_COMMIT" ]; then
+    log_warning "Could not find commit before 2024-11-01, trying 2024-06-01..."
+    GOOD_COMMIT=$(git rev-list -n 1 --before="2024-06-01" vlm_master)
+fi
+
+if [ -z "$GOOD_COMMIT" ]; then
+    log_error "Could not find a suitable pre-bug commit!"
+    log_error "Please manually find a commit from before March 2025"
+    exit 1
+fi
+
+log "Checking out known-good commit: $GOOD_COMMIT"
+git checkout "$GOOD_COMMIT"
 
 # Show which version we're using
-log "asn1c branch and commit info:"
-git branch
-git log -n1 --oneline
+log "asn1c commit info:"
+git log -n1
 
 # Build asn1c
 log "Building asn1c..."
@@ -105,11 +127,22 @@ make -j$(nproc)
 sudo make install
 sudo ldconfig
 
-# Verify installation
+# Verify installation and -gen-APER support
 if [ -f "/opt/asn1c/bin/asn1c" ]; then
     log_success "asn1c installed at /opt/asn1c/bin/asn1c"
     log "asn1c version:"
     /opt/asn1c/bin/asn1c -h 2>&1 | head -5 || true
+    
+    # Test -gen-APER support
+    log "Testing -gen-APER support..."
+    if /opt/asn1c/bin/asn1c -gen-APER 2>&1 | grep -q "No input files\|input file"; then
+        log_success "asn1c supports -gen-APER flag!"
+    elif /opt/asn1c/bin/asn1c -gen-APER 2>&1 | grep -qi "invalid\|unknown"; then
+        log_error "This commit doesn't support -gen-APER! Try an older commit."
+        exit 1
+    else
+        log_warning "-gen-APER test inconclusive, continuing..."
+    fi
 else
     log_error "asn1c installation failed!"
     exit 1
@@ -138,7 +171,7 @@ cd cmake_targets || { log_error "Failed to enter cmake_targets"; exit 1; }
 # Step 3: Install OAI dependencies (protect our asn1c from being overwritten)
 # =============================================================================
 log "Step 3: Installing OAI dependencies via build_oai -I..."
-log "Protecting our OAI asn1c installation from being overwritten..."
+log "Protecting our good asn1c installation from being overwritten..."
 
 # Temporarily move our good asn1c to prevent overwrite
 sudo mv /opt/asn1c /opt/asn1c_good
@@ -150,14 +183,21 @@ sudo mv /opt/asn1c /opt/asn1c_good
 sudo rm -rf /opt/asn1c
 sudo mv /opt/asn1c_good /opt/asn1c
 
-log_success "OAI dependencies installed, OAI asn1c (master.aper) restored"
+log_success "OAI dependencies installed, good asn1c restored"
 
 # Verify asn1c is still correct
-log "Verifying asn1c installation..."
+log "Verifying asn1c installation after restore..."
 /opt/asn1c/bin/asn1c -h 2>&1 | head -3
 
+# Double-check -gen-APER still works
+if /opt/asn1c/bin/asn1c -gen-APER 2>&1 | grep -q "No input files\|input file"; then
+    log_success "Confirmed: asn1c still supports -gen-APER"
+else
+    log_warning "-gen-APER check returned unexpected output, but continuing..."
+fi
+
 # =============================================================================
-# Step 4: Build OpenAirInterface5G with the OAI asn1c
+# Step 4: Build OpenAirInterface5G with the fixed asn1c
 # =============================================================================
 log "Step 4: Building OpenAirInterface5G (gNB, nrUE, E2 agent)..."
 log "This may take 30-60 minutes depending on your system..."
@@ -245,8 +285,8 @@ echo "  - nr-softmodem: $INITIAL_DIR/openairinterface5g/cmake_targets/ran_build/
 echo "  - nearRT-RIC:   $INITIAL_DIR/flexric/build/examples/ric/nearRT-RIC"
 echo ""
 echo "asn1c fix applied:"
-echo "  - Using OAI's official asn1c: gitlab.eurecom.fr/oai/asn1c (master.aper branch)"
-echo "  - This provides APER support AND proper ASN.1 handling for OAI"
+echo "  - Using mouse07410/asn1c pinned to pre-bug commit (before March 2025)"
+echo "  - This has -gen-APER support AND no hyphen-to-underscore bug"
 echo ""
 echo "You can now run: cd docker && ./lab_start.sh"
 echo ""
