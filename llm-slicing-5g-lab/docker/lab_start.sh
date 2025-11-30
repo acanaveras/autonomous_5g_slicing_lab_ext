@@ -268,9 +268,18 @@ echo ""
 
 # Step 12.5: Configure initial bandwidth allocation (50/50)
 log "Step 12.5: Configuring initial slice bandwidth allocation (50/50)..."
+log "Waiting for FlexRIC iApp interface to be ready for xApp connections..."
+sleep 10  # Give FlexRIC more time to initialize iApp interface
+
 if [ -f "change_rc_slice_docker.sh" ]; then
     chmod +x change_rc_slice_docker.sh
-    ./change_rc_slice_docker.sh 50 50 2>&1 | tee -a "$LOG_FILE"
+
+    # Try bandwidth allocation, retry once if it fails
+    if ./change_rc_slice_docker.sh 50 50 2>&1 | tee -a "$LOG_FILE" | grep -q "Error sending sctp message"; then
+        log_warning "First bandwidth allocation attempt failed (FlexRIC not ready), retrying in 10 seconds..."
+        sleep 10
+        ./change_rc_slice_docker.sh 50 50 2>&1 | tee -a "$LOG_FILE"
+    fi
     if [ $? -eq 0 ]; then
         log_success "Slice bandwidth configured: Slice1=50%, Slice2=50%"
     else
