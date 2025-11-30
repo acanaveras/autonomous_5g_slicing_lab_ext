@@ -137,7 +137,10 @@ def MonitoringAgent(state: State):
                 return {
                     "messages": response,
                     "start": state.get('start', 0),
-                    "files": {"metrics": trigger_data}
+                    "files": {"metrics": trigger_data},
+                    "config_value": state.get('config_value', ["50", "50"]),
+                    "count": state.get('count', 0),
+                    "consent": state.get('consent', 'yes')
                 }
             else:
                 logging.info(f"✓ All UEs within acceptable packet loss range (< {PACKET_LOSS_THRESHOLD}%)")
