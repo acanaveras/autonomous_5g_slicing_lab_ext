@@ -388,8 +388,12 @@ echo ""
 log "Step 18: Starting AI Agents for autonomous network slicing..."
 cd "$ROOT_DIR/agentic-llm"
 
-# Create logs directory for agents
+# Create logs directory for agents with correct permissions
 mkdir -p logs
+chmod 777 logs
+# Create agent.log with write permissions for all users
+touch logs/agent.log
+chmod 666 logs/agent.log
 
 # Kill any existing agent process
 pkill -f "langgraph_agent.py" 2>/dev/null || true
