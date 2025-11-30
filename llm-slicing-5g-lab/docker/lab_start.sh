@@ -267,53 +267,32 @@ fi
 echo ""
 
 # Step 13: Start UE (Slice 1)
+# Note: Running multiple UEs in Docker host mode with RF simulator causes conflicts
+# For production, use network namespaces or separate RF simulator instances
 log "Step 13: Starting UE (Slice 1)..."
 docker compose -f docker-compose-ue-host.yaml up -d oai-ue-slice1 2>&1 | tee -a "$LOG_FILE"
 wait_for_healthy "oai-ue-slice1" 60
 log_success "UE (Slice 1) is running"
 echo ""
 
-# Step 14: Verify UE1 connection
-log "Step 14: Verifying UE1 connection..."
+# Step 14: Verify UE connection
+log "Step 14: Verifying UE connection..."
 sleep 10
 if docker logs oai-ue-slice1 2>&1 | grep -q "REGISTRATION ACCEPT"; then
-    log_success "UE1 successfully registered with 5G Core"
+    log_success "UE successfully registered with 5G Core"
 
     # Check for IP address assignment
     if docker logs oai-ue-slice1 2>&1 | grep -q "Interface oaitun_ue1 successfully configured"; then
         ue_ip=$(docker logs oai-ue-slice1 2>&1 | grep "Interface oaitun_ue1 successfully configured" | tail -1 | grep -oP 'ip address \K[0-9.]+')
-        log_success "UE1 assigned IP address: $ue_ip"
+        log_success "UE assigned IP address: $ue_ip"
     fi
 else
-    log_warning "UE1 registration not confirmed, checking logs..."
+    log_warning "UE registration not confirmed, checking logs..."
 fi
 echo ""
 
-# Step 15: Start UE (Slice 2)
-log "Step 15: Starting UE (Slice 2)..."
-docker compose -f docker-compose-ue-host.yaml up -d oai-ue-slice2 2>&1 | tee -a "$LOG_FILE"
-wait_for_healthy "oai-ue-slice2" 60
-log_success "UE (Slice 2) is running"
-echo ""
-
-# Step 16: Verify UE2 connection
-log "Step 16: Verifying UE2 connection..."
-sleep 10
-if docker logs oai-ue-slice2 2>&1 | grep -q "REGISTRATION ACCEPT"; then
-    log_success "UE2 successfully registered with 5G Core"
-
-    # Check for IP address assignment
-    if docker logs oai-ue-slice2 2>&1 | grep -q "Interface oaitun_ue3 successfully configured"; then
-        ue2_ip=$(docker logs oai-ue-slice2 2>&1 | grep "Interface oaitun_ue3 successfully configured" | tail -1 | grep -oP 'ip address \K[0-9.]+')
-        log_success "UE2 assigned IP address: $ue2_ip"
-    fi
-else
-    log_warning "UE2 registration not confirmed, checking logs..."
-fi
-echo ""
-
-# Step 17: Start Monitoring Stack (Optional)
-log "Step 17: Starting Monitoring Stack (InfluxDB, Grafana, Kinetica, Streamlit)..."
+# Step 15: Start Monitoring Stack (Optional)
+log "Step 15: Starting Monitoring Stack (InfluxDB, Grafana, Kinetica, Streamlit)..."
 if docker compose -f docker-compose-monitoring.yaml up -d 2>&1 | tee -a "$LOG_FILE"; then
     log "Monitoring services starting..."
     wait_for_healthy "influxdb" 60
@@ -326,8 +305,8 @@ else
 fi
 echo ""
 
-# Step 18: Start iperf3 servers on external DN
-log "Step 18: Starting iperf3 servers on external data network..."
+# Step 16: Start iperf3 servers on external DN
+log "Step 16: Starting iperf3 servers on external data network..."
 
 # Kill any existing iperf3 servers first
 docker exec oai-ext-dn pkill iperf3 2>/dev/null || true
@@ -356,8 +335,8 @@ else
 fi
 echo ""
 
-# Step 19: Start traffic generator
-log "Step 19: Starting traffic generator..."
+# Step 17: Start traffic generator
+log "Step 17: Starting traffic generator..."
 cd ..
 TRAFFIC_LOG="$LOG_DIR/traffic_gen_final.log"
 AGENT_LOG="$LOG_DIR/agent.log"
@@ -405,25 +384,19 @@ fi
 cd docker
 echo ""
 
-# Step 20: Display system status
-log "Step 20: System Status Summary"
+# Step 18: Display system status
+log "Step 18: System Status Summary"
 echo ""
 echo "Running Containers:"
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "NAME|oai-|flexric|influx|grafana|kinetica|streamlit"
 echo ""
 
-# Step 21: Quick connectivity test
-log "Step 21: Testing UE connectivity..."
+# Step 19: Quick connectivity test
+log "Step 19: Testing UE connectivity..."
 if docker exec oai-ue-slice1 ping -I oaitun_ue1 -c 2 8.8.8.8 &>/dev/null; then
-    log_success "UE1 has internet connectivity!"
+    log_success "UE has internet connectivity!"
 else
-    log_warning "UE1 connectivity test failed"
-fi
-
-if docker exec oai-ue-slice2 ping -I oaitun_ue3 -c 2 8.8.8.8 &>/dev/null; then
-    log_success "UE2 has internet connectivity!"
-else
-    log_warning "UE2 connectivity test failed"
+    log_warning "UE connectivity test failed"
 fi
 echo ""
 
@@ -434,8 +407,7 @@ echo ""
 echo "5G Network Access:"
 echo "  - View FlexRIC logs: docker logs -f flexric"
 echo "  - View gNodeB logs: docker logs -f oai-gnb"
-echo "  - View UE1 logs: docker logs -f oai-ue-slice1"
-echo "  - View UE2 logs: docker logs -f oai-ue-slice2"
+echo "  - View UE logs: docker logs -f oai-ue-slice1"
 echo ""
 echo "Traffic Generation:"
 echo "  - Traffic generator log: tail -f $TRAFFIC_LOG"
