@@ -266,12 +266,18 @@ else
 fi
 echo ""
 
-# Step 13: Start UEs (Slice 1 and Slice 2)
-log "Step 13: Starting both UEs (Slice 1 and Slice 2) with Docker bridge networking..."
-docker compose -f docker-compose-ue.yaml up -d 2>&1 | tee -a "$LOG_FILE"
+# Step 13: Start UE1 (Slice 1) with host networking
+log "Step 13: Starting UE1 (Slice 1)..."
+docker compose -f docker-compose-ue-host.yaml up -d oai-ue-slice1 2>&1 | tee -a "$LOG_FILE"
 wait_for_healthy "oai-ue-slice1" 60
+log_success "UE1 (Slice 1) is running"
+echo ""
+
+# Step 13.5: Start UE2 (Slice 2) with host networking
+log "Step 13.5: Starting UE2 (Slice 2)..."
+docker compose -f docker-compose-ue-host.yaml up -d oai-ue-slice2 2>&1 | tee -a "$LOG_FILE"
 wait_for_healthy "oai-ue-slice2" 60
-log_success "Both UEs are running"
+log_success "UE2 (Slice 2) is running"
 echo ""
 
 # Step 14: Verify UE connections
