@@ -140,7 +140,7 @@ COPY --from=flexric-builder \
 # Create FlexRIC configuration directory and default config
 RUN mkdir -p /usr/local/etc/flexric && \
     echo "[NEAR-RIC]" > /usr/local/etc/flexric/flexric.conf && \
-    echo "NEAR_RIC_IP = 0.0.0.0" >> /usr/local/etc/flexric/flexric.conf && \
+    echo "NEAR_RIC_IP = 127.0.0.1" >> /usr/local/etc/flexric/flexric.conf && \
     echo "" >> /usr/local/etc/flexric/flexric.conf && \
     echo "[XAPP]" >> /usr/local/etc/flexric/flexric.conf && \
     echo "DB_DIR = /tmp/" >> /usr/local/etc/flexric/flexric.conf
