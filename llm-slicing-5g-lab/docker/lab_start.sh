@@ -266,26 +266,61 @@ else
 fi
 echo ""
 
-# Step 13: Start UE (Slice 1 only for now due to TUN interface limitation)
-log "Step 13: Starting UE (Slice 1)..."
-docker compose -f docker-compose-ue-host.yaml up -d oai-ue-slice1 2>&1 | tee -a "$LOG_FILE"
-wait_for_healthy "oai-ue-slice1" 60
-log_success "UE (Slice 1) is running"
+# Step 12.5: Configure initial bandwidth allocation (50/50)
+log "Step 12.5: Configuring initial slice bandwidth allocation (50/50)..."
+if [ -f "change_rc_slice_docker.sh" ]; then
+    chmod +x change_rc_slice_docker.sh
+    ./change_rc_slice_docker.sh 50 50 2>&1 | tee -a "$LOG_FILE"
+    if [ $? -eq 0 ]; then
+        log_success "Slice bandwidth configured: Slice1=50%, Slice2=50%"
+    else
+        log_warning "Failed to configure slice bandwidth, continuing anyway..."
+    fi
+    sleep 3
+else
+    log_error "change_rc_slice_docker.sh not found at $(pwd)/change_rc_slice_docker.sh"
+    log_warning "Continuing without bandwidth allocation..."
+fi
 echo ""
 
-# Step 14: Verify UE connection
-log "Step 14: Verifying UE connection..."
-sleep 10
+# Step 13: Start UEs (Slice 1 and Slice 2)
+log "Step 13: Starting both UEs (Slice 1 and Slice 2) with Docker bridge networking..."
+docker compose -f docker-compose-ue.yaml up -d 2>&1 | tee -a "$LOG_FILE"
+wait_for_healthy "oai-ue-slice1" 60
+wait_for_healthy "oai-ue-slice2" 60
+log_success "Both UEs are running"
+echo ""
+
+# Step 14: Verify UE connections
+log "Step 14: Verifying UE connections..."
+sleep 15
+
+# Verify UE1 (Slice 1)
+log "Checking UE1 (Slice 1) registration..."
 if docker logs oai-ue-slice1 2>&1 | grep -q "REGISTRATION ACCEPT"; then
-    log_success "UE successfully registered with 5G Core"
+    log_success "UE1 successfully registered with 5G Core (Slice 1)"
 
     # Check for IP address assignment
     if docker logs oai-ue-slice1 2>&1 | grep -q "Interface oaitun_ue1 successfully configured"; then
-        ue_ip=$(docker logs oai-ue-slice1 2>&1 | grep "Interface oaitun_ue1 successfully configured" | tail -1 | grep -oP 'ip address \K[0-9.]+')
-        log_success "UE assigned IP address: $ue_ip"
+        ue1_ip=$(docker logs oai-ue-slice1 2>&1 | grep "Interface oaitun_ue1 successfully configured" | tail -1 | grep -oP 'ip address \K[0-9.]+')
+        log_success "UE1 assigned IP address: $ue1_ip"
     fi
 else
-    log_warning "UE registration not confirmed, checking logs..."
+    log_warning "UE1 registration not confirmed, checking logs..."
+fi
+
+# Verify UE2 (Slice 2)
+log "Checking UE2 (Slice 2) registration..."
+if docker logs oai-ue-slice2 2>&1 | grep -q "REGISTRATION ACCEPT"; then
+    log_success "UE2 successfully registered with 5G Core (Slice 2)"
+
+    # Check for IP address assignment (oaitun_ue3 due to --node-number 4)
+    if docker logs oai-ue-slice2 2>&1 | grep -q "Interface oaitun_ue3 successfully configured"; then
+        ue2_ip=$(docker logs oai-ue-slice2 2>&1 | grep "Interface oaitun_ue3 successfully configured" | tail -1 | grep -oP 'ip address \K[0-9.]+')
+        log_success "UE2 assigned IP address: $ue2_ip"
+    fi
+else
+    log_warning "UE2 registration not confirmed, checking logs..."
 fi
 echo ""
 
@@ -391,10 +426,19 @@ echo ""
 
 # Step 19: Quick connectivity test
 log "Step 19: Testing UE connectivity..."
+
+# Test UE1
 if docker exec oai-ue-slice1 ping -I oaitun_ue1 -c 2 8.8.8.8 &>/dev/null; then
-    log_success "UE has internet connectivity!"
+    log_success "UE1 (Slice 1) has internet connectivity!"
 else
-    log_warning "UE connectivity test failed"
+    log_warning "UE1 connectivity test failed"
+fi
+
+# Test UE2
+if docker exec oai-ue-slice2 ping -I oaitun_ue3 -c 2 8.8.8.8 &>/dev/null; then
+    log_success "UE2 (Slice 2) has internet connectivity!"
+else
+    log_warning "UE2 connectivity test failed"
 fi
 echo ""
 
@@ -405,7 +449,13 @@ echo ""
 echo "5G Network Access:"
 echo "  - View FlexRIC logs: docker logs -f flexric"
 echo "  - View gNodeB logs: docker logs -f oai-gnb"
-echo "  - View UE logs: docker logs -f oai-ue-slice1"
+echo "  - View UE1 logs: docker logs -f oai-ue-slice1"
+echo "  - View UE2 logs: docker logs -f oai-ue-slice2"
+echo ""
+echo "Slice Management:"
+echo "  - Current allocation: Slice1=50%, Slice2=50%"
+echo "  - Change bandwidth: ./change_rc_slice_docker.sh <slice1%> <slice2%>"
+echo "  - Example: ./change_rc_slice_docker.sh 80 20"
 echo ""
 echo "Traffic Generation:"
 echo "  - Traffic generator log: tail -f $TRAFFIC_LOG"

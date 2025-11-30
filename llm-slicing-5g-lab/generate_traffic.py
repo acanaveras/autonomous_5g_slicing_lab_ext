@@ -45,6 +45,44 @@ def get_ue_ip(container_name: str = "oai-ue-slice1") -> str:
     logger.error("❌ Could not determine UE IP address!")
     return "12.1.1.2"  # Last resort fallback
 
+def get_ue2_ip(container_name: str = "oai-ue-slice2", interface: str = "oaitun_ue3") -> str:
+    """Auto-detect UE2 IP address from the container (uses oaitun_ue3 due to --node-number 4)"""
+    try:
+        result = subprocess.run(
+            ["docker", "exec", container_name, "ip", "addr", "show", interface],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            # Parse IP address from output like: "inet 12.1.1.x/24 brd ..."
+            for line in result.stdout.split('\n'):
+                if 'inet ' in line and '/24' in line:
+                    ip = line.strip().split()[1].split('/')[0]
+                    logger.info(f"✅ Auto-detected UE2 IP: {ip}")
+                    return ip
+    except Exception as e:
+        logger.error(f"Failed to auto-detect UE2 IP: {e}")
+
+    # Fallback to common IPs for UE2
+    logger.warning("Could not auto-detect UE2 IP, trying common addresses...")
+    for ip in ["12.1.1.130", "12.1.1.131", "12.1.1.132"]:
+        try:
+            # Test ping to see if interface responds
+            result = subprocess.run(
+                ["docker", "exec", container_name, "ping", "-I", ip, "-c", "1", "-W", "1", "192.168.70.135"],
+                capture_output=True,
+                timeout=3
+            )
+            if result.returncode == 0:
+                logger.info(f"✅ Found working UE2 IP: {ip}")
+                return ip
+        except:
+            continue
+
+    logger.error("❌ Could not determine UE2 IP address!")
+    return "12.1.1.130"  # Last resort fallback
+
 # Configure Kinetica (optional - will continue without it)
 try:
     from gpudb import GPUdb, GPUdbTable
@@ -140,20 +178,30 @@ def write_to_influxdb(ue_name: str, record: dict):
     except Exception as e:
         pass  # Silent fail for InfluxDB
 
-def iperf_runner_continuous(ue_container, ue_name, bind_host, server_host, udp_port, bandwidth, test_length_secs, log_file):
+def iperf_runner_continuous(ue_container, ue_name, bind_host, server_host, udp_port, bandwidth_list, test_length_secs, log_file):
+    """
+    Run continuous iperf3 tests with alternating bandwidth.
+
+    Args:
+        bandwidth_list: List of two bandwidths to alternate between (e.g., ["30M", "120M"])
+    """
     iteration = 0
+    bandwidth_index = 0  # Start with first bandwidth in list
+
     while True:
         iteration += 1
+        current_bandwidth = bandwidth_list[bandwidth_index]
+
         try:
             # CRITICAL FIX: Use unbuffered Python + immediate flush
             iperf_cmd = [
                 "docker", "exec", ue_container,
                 "iperf3", "-B", bind_host, "-c", server_host,
-                "-p", str(udp_port), "-R", "-u", "-b", bandwidth,
+                "-p", str(udp_port), "-R", "-u", "-b", current_bandwidth,
                 "-t", str(test_length_secs), "--forceflush"  # Force immediate output
             ]
 
-            logger.info(f"🚀 [{ue_name}] Starting iteration {iteration} ({bandwidth}, {test_length_secs}s)")
+            logger.info(f"🚀 [{ue_name}] Starting iteration {iteration} ({current_bandwidth}, {test_length_secs}s)")
 
             proc = subprocess.Popen(
                 iperf_cmd,
@@ -198,17 +246,8 @@ def iperf_runner_continuous(ue_container, ue_name, bind_host, server_host, udp_p
                             if records_inserted == 0:  # Only log first error
                                 logger.error(f"❌ [{ue_name}] Kinetica insert failed: {e}")
 
-                    # Write to InfluxDB for primary UE
+                    # Write to InfluxDB
                     write_to_influxdb(ue_name, record)
-
-                    # Also write as UE3 for dashboard compatibility with variations to simulate different UE behavior
-                    if ue_name == "UE1":
-                        # Create UE3 record with variations (±5-15% fluctuation)
-                        ue3_record = record.copy()
-                        ue3_record["bitrate"] = record["bitrate"] * random.uniform(0.85, 1.15)  # ±15% variation
-                        ue3_record["jitter"] = record["jitter"] * random.uniform(0.8, 1.3)  # ±30% variation
-                        ue3_record["loss_percentage"] = max(0, record["loss_percentage"] + random.uniform(-0.5, 1.5))  # +0 to +1.5% variation
-                        write_to_influxdb("UE3", ue3_record)
 
                     # Write to log file
                     with open(log_file, "a") as f:
@@ -216,6 +255,9 @@ def iperf_runner_continuous(ue_container, ue_name, bind_host, server_host, udp_p
 
             proc.wait()
             logger.info(f"✅ [{ue_name}] Iteration {iteration} completed - {records_inserted} records inserted")
+
+            # Alternate bandwidth for next iteration
+            bandwidth_index = (bandwidth_index + 1) % len(bandwidth_list)
             time.sleep(2)
 
         except Exception as e:
@@ -224,23 +266,52 @@ def iperf_runner_continuous(ue_container, ue_name, bind_host, server_host, udp_p
 
 # Start traffic generation
 logger.info("="*60)
-logger.info("🚀 CONTINUOUS REAL-TIME TRAFFIC GENERATION")
+logger.info("🚀 CONTINUOUS REAL-TIME TRAFFIC GENERATION - DUAL UE WITH ALTERNATING BANDWIDTH")
 logger.info("="*60)
 
-# Auto-detect UE IP address
-ue_ip = get_ue_ip("oai-ue-slice1")
-logger.info(f"Using UE IP: {ue_ip}")
+# Auto-detect UE1 IP address
+ue1_ip = get_ue_ip("oai-ue-slice1")
+logger.info(f"Using UE1 IP: {ue1_ip}")
 
+# Auto-detect UE2 IP address
+ue2_ip = get_ue2_ip("oai-ue-slice2")
+logger.info(f"Using UE2 IP: {ue2_ip}")
+
+# Define alternating bandwidths (matching original DLI_Lab_Setup.ipynb behavior)
+# UE1 starts at 30M, alternates to 120M
+# UE2 starts at 120M, alternates to 30M
+# This creates congestion scenarios that alternate between slices
+logger.info("")
+logger.info("Traffic Pattern:")
+logger.info("  UE1: 30M → 120M → 30M → 120M ... (alternating)")
+logger.info("  UE2: 120M → 30M → 120M → 30M ... (alternating, opposite of UE1)")
+logger.info("  This creates alternating congestion to demonstrate dynamic bandwidth allocation")
+logger.info("")
+
+# Create traffic generation threads for both UEs with alternating bandwidths
 t1 = threading.Thread(target=iperf_runner_continuous, args=(
-    "oai-ue-slice1", "UE1", ue_ip, "192.168.70.135", 5201, "30M", 60,
+    "oai-ue-slice1", "UE1", ue1_ip, "192.168.70.135", 5201,
+    ["30M", "120M"],  # Start at 30M, then alternate to 120M
+    100,  # 100 seconds per iteration (matching original)
     os.path.join(os.getcwd(), "logs", "UE1_iperfc.log")
 ), daemon=False)
 
+t2 = threading.Thread(target=iperf_runner_continuous, args=(
+    "oai-ue-slice2", "UE2", ue2_ip, "192.168.70.135", 5202,
+    ["120M", "30M"],  # Start at 120M, then alternate to 30M (opposite of UE1)
+    100,  # 100 seconds per iteration (matching original)
+    os.path.join(os.getcwd(), "logs", "UE2_iperfc.log")
+), daemon=False)
+
+# Start both traffic generators
 t1.start()
-logger.info("✅ Traffic generation for UE1 started - real-time streaming enabled")
+t2.start()
+logger.info("✅ Traffic generation for UE1 and UE2 started - real-time streaming enabled")
+logger.info("   Both UEs will alternate between 30M and 120M to create congestion scenarios")
 
 try:
     t1.join()
+    t2.join()
 except KeyboardInterrupt:
     logger.info("🛑 Stopping...")
     if influx_write_api:
