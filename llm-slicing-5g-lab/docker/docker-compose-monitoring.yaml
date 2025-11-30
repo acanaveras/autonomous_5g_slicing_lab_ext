@@ -129,7 +129,7 @@ services:
     volumes:
       - ../../agentic-llm/config.yaml:/app/config.yaml:ro
       - ../../.env:/app/.env:ro
-      - ../logs:/app/logs
+      - ../../agentic-llm/logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
       interval: 30s

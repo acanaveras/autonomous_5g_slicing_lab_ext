@@ -1,4 +1,4 @@
-AGENT_LOG_FILE: ../llm-slicing-5g-lab/logs/agent.log
+AGENT_LOG_FILE: logs/agent.log
 LOG_FILE_UE1: ../llm-slicing-5g-lab/logs/UE1_iperfc.log
 LOG_FILE_UE2: ../llm-slicing-5g-lab/logs/UE2_iperfc.log
 gnb_logs: ../llm-slicing-5g-lab/logs/gNodeB_docker.log
