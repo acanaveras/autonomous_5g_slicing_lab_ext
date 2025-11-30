@@ -57,7 +57,8 @@ logger.propagate = False
 
 # Configuration: Paths for both log files
 config_file =  yaml.safe_load(open('config.yaml', 'r'))
-AGENT_LOG_FILE = config_file['AGENT_LOG_FILE']
+# Allow environment variable to override config file (for Docker container)
+AGENT_LOG_FILE = os.getenv('AGENT_LOG_FILE', config_file['AGENT_LOG_FILE'])
 GRAPHANA_DASHBOARD = os.getenv('GRAFANA_DASHBOARD_ID', '')
 
 logger.info(f"__________________Grafana Dashboard ID: {GRAPHANA_DASHBOARD}")
