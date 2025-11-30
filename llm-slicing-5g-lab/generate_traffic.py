@@ -267,12 +267,37 @@ logger.info("")
 # Track UE1 metrics for UE3 simulation
 ue1_last_metrics = []
 
-def simulate_ue3_metrics(ue1_record, target_bandwidth):
+def simulate_ue3_metrics(ue1_record, target_bandwidth, ue1_bandwidth):
     """Create realistic UE3 metrics based on UE1 pattern but different bandwidth"""
     # Calculate bandwidth ratio
-    ue1_bw = 30 if "30M" in str(ue1_record.get("bitrate", 30)) or bandwidth_ue1 == "30M" else 120
+    ue1_bw = 30 if ue1_bandwidth == "30M" else 120
     ue3_bw = 30 if target_bandwidth == "30M" else 120
     ratio = ue3_bw / ue1_bw
+
+    # Simulate packet loss based on bandwidth demand and slice allocation
+    # Assume 50/50 slice allocation initially (each slice gets ~60M of 120M total)
+    # When requesting 120M with 50% allocation, expect ~0.5-2% loss
+    # When requesting 30M with 50% allocation, minimal loss ~0-0.3%
+    base_loss_ue1 = 0.0
+    base_loss_ue3 = 0.0
+
+    if ue1_bw == 120:  # UE1 high bandwidth
+        # Requesting 120M but slice limited to ~60M → congestion
+        base_loss_ue1 = random.uniform(0.5, 2.0)
+    else:  # UE1 low bandwidth
+        # Requesting 30M, well within 60M limit → minimal loss
+        base_loss_ue1 = random.uniform(0.0, 0.3)
+
+    if ue3_bw == 120:  # UE3 high bandwidth
+        # Requesting 120M but slice limited to ~60M → congestion
+        base_loss_ue3 = random.uniform(0.8, 2.5)  # Slightly different than UE1
+    else:  # UE3 low bandwidth
+        # Requesting 30M, well within 60M limit → minimal loss
+        base_loss_ue3 = random.uniform(0.0, 0.4)
+
+    # Calculate total packets based on bandwidth and duration
+    total_packets = int(ue1_record["total_packets"] * ratio * random.uniform(0.95, 1.05))
+    lost_packets = int(total_packets * (base_loss_ue3 / 100.0))
 
     # Create UE3 record with scaled metrics and realistic variations
     ue3_record = {
@@ -284,13 +309,18 @@ def simulate_ue3_metrics(ue1_record, target_bandwidth):
         # Scale bandwidth with ratio + small random variation
         "bitrate": ue1_record["bitrate"] * ratio * random.uniform(0.95, 1.05),
         "data_transferred": ue1_record["data_transferred"] * ratio * random.uniform(0.95, 1.05),
-        # Jitter varies independently
-        "jitter": ue1_record["jitter"] * random.uniform(0.8, 1.3),
-        # Packet loss varies (higher bandwidth = potentially more loss)
-        "loss_percentage": max(0, ue1_record["loss_percentage"] * random.uniform(0.7, 1.5)),
-        "lost_packets": int(ue1_record["lost_packets"] * random.uniform(0.7, 1.5)),
-        "total_packets": int(ue1_record["total_packets"] * ratio * random.uniform(0.95, 1.05)),
+        # Jitter varies independently (higher at high bandwidth)
+        "jitter": ue1_record["jitter"] * random.uniform(0.8, 1.5) + (2.0 if ue3_bw == 120 else 0.5),
+        # Realistic packet loss based on bandwidth demand vs allocation
+        "loss_percentage": base_loss_ue3,
+        "lost_packets": lost_packets,
+        "total_packets": total_packets,
     }
+
+    # Also add loss to UE1 record for realism (modify the original record)
+    ue1_record["loss_percentage"] = base_loss_ue1
+    ue1_record["lost_packets"] = int(ue1_record["total_packets"] * (base_loss_ue1 / 100.0))
+
     return ue3_record
 
 def iperf_runner_with_ue3_sim(ue_container, ue_name, bind_host, server_host, udp_port, bandwidth, test_length_secs, log_file, ue3_bandwidth):
@@ -348,11 +378,13 @@ def iperf_runner_with_ue3_sim(ue_container, ue_name, bind_host, server_host, udp
                         if records_inserted == 0:
                             logger.error(f"❌ [UE1] Kinetica insert failed: {e}")
 
-                # Write UE1 to InfluxDB
+                # Generate UE3 simulated metrics (this also adds loss to UE1)
+                ue3_record = simulate_ue3_metrics(ue1_record, ue3_bandwidth, bandwidth)
+
+                # Write UE1 to InfluxDB (now with added packet loss)
                 write_to_influxdb(ue_name, ue1_record)
 
-                # Generate and write UE3 simulated metrics
-                ue3_record = simulate_ue3_metrics(ue1_record, ue3_bandwidth)
+                # Write UE3 to InfluxDB
                 write_to_influxdb("UE3", ue3_record)
 
                 # Insert UE3 into Kinetica
