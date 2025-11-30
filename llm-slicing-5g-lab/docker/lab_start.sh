@@ -266,32 +266,6 @@ else
 fi
 echo ""
 
-# Step 12.5: Configure initial bandwidth allocation (50/50)
-log "Step 12.5: Configuring initial slice bandwidth allocation (50/50)..."
-log "Waiting for FlexRIC iApp interface to be ready for xApp connections..."
-sleep 10  # Give FlexRIC more time to initialize iApp interface
-
-if [ -f "change_rc_slice_docker.sh" ]; then
-    chmod +x change_rc_slice_docker.sh
-
-    # Try bandwidth allocation, retry once if it fails
-    if ./change_rc_slice_docker.sh 50 50 2>&1 | tee -a "$LOG_FILE" | grep -q "Error sending sctp message"; then
-        log_warning "First bandwidth allocation attempt failed (FlexRIC not ready), retrying in 10 seconds..."
-        sleep 10
-        ./change_rc_slice_docker.sh 50 50 2>&1 | tee -a "$LOG_FILE"
-    fi
-    if [ $? -eq 0 ]; then
-        log_success "Slice bandwidth configured: Slice1=50%, Slice2=50%"
-    else
-        log_warning "Failed to configure slice bandwidth, continuing anyway..."
-    fi
-    sleep 3
-else
-    log_error "change_rc_slice_docker.sh not found at $(pwd)/change_rc_slice_docker.sh"
-    log_warning "Continuing without bandwidth allocation..."
-fi
-echo ""
-
 # Step 13: Start UEs (Slice 1 and Slice 2)
 log "Step 13: Starting both UEs (Slice 1 and Slice 2) with Docker bridge networking..."
 docker compose -f docker-compose-ue.yaml up -d 2>&1 | tee -a "$LOG_FILE"
