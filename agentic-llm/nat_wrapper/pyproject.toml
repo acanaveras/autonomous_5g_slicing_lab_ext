@@ -22,8 +22,5 @@ description = "5G Network Slicing Agentic Workflow with NeMo Agent Toolkit"
 keywords = ["ai", "agents", "5g", "network-slicing"]
 classifiers = ["Programming Language :: Python"]
 
-[tool.uv.sources]
-nvidia-nat = { path = "../../..", editable = true }
-
 [project.entry-points.'nat.components']
 nat_5g_slicing = "nat_5g_slicing.register"
