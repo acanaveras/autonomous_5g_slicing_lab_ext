@@ -19,12 +19,19 @@ from nat.builder.builder import Builder
 from nat.builder.function import FunctionGroup
 from nat.cli.register_workflow import register_function_group
 from nat.data_models.function import FunctionGroupBaseConfig
-from phoenix.otel import register
 
-tracer_provider = register(
-    project_name="5g-network-agent",
-    endpoint="http://0.0.0.0:6006",
-)
+# Try to import Phoenix tracing - make it optional
+try:
+    from phoenix.otel import register
+    tracer_provider = register(
+        project_name="5g-network-agent",
+        endpoint="http://0.0.0.0:6006",
+    )
+    PHOENIX_TRACING_AVAILABLE = True
+except Exception as e:
+    PHOENIX_TRACING_AVAILABLE = False
+    tracer_provider = None
+    logging.warning(f"Phoenix tracing not available: {e}")
 
 # Import profiling and guardrails modules
 try:

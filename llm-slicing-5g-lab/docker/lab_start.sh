@@ -163,9 +163,10 @@ if [ -d "$NAT_WRAPPER_DIR" ]; then
     # Install Phoenix observability dependencies first
     log "Installing Phoenix observability dependencies..."
     if command -v uv &>/dev/null; then
-        uv pip install openinference-instrumentation-langchain arize-phoenix-otel phoenix 2>&1 | tee -a "$LOG_FILE"
+        # Install specific versions to avoid compatibility issues
+        uv pip install "arize-phoenix>=4.0.0" "arize-phoenix-otel>=0.1.0" "openinference-instrumentation-langchain>=0.1.0" 2>&1 | tee -a "$LOG_FILE"
     else
-        pip3 install openinference-instrumentation-langchain arize-phoenix-otel phoenix 2>&1 | tee -a "$LOG_FILE"
+        pip3 install "arize-phoenix>=4.0.0" "arize-phoenix-otel>=0.1.0" "openinference-instrumentation-langchain>=0.1.0" 2>&1 | tee -a "$LOG_FILE"
     fi
     
     if [ $? -eq 0 ]; then
