@@ -19,6 +19,12 @@ from nat.builder.builder import Builder
 from nat.builder.function import FunctionGroup
 from nat.cli.register_workflow import register_function_group
 from nat.data_models.function import FunctionGroupBaseConfig
+from arize.phoenix import register
+
+tracer_provider = register(
+    project_name="5g-network-agent",
+    endpoint="http://0.0.0.0:6006",
+)
 
 # Import profiling and guardrails modules
 try:
