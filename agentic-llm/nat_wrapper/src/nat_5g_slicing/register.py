@@ -151,6 +151,10 @@ async def network_tools(
 
     load_dotenv(find_dotenv())
 
+    if config.phoenix_enabled:
+        from nat_5g_slicing.phoenix_setup import setup_phoenix_tracing
+        setup_phoenix_tracing(config.phoenix_endpoint)
+
     # Initialize profiler if available
     profiler = None
     if PROFILING_AVAILABLE and config.profiling_enabled:

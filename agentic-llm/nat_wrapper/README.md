@@ -217,6 +217,7 @@ nat serve --config_file config.yml --port 4999
 **Solution:**
 ```bash
 cd agentic-llm/nat_wrapper
+uv pip install openinference-instrumentation-langchain arize-phoenix-otel
 uv pip install -e .
 ```
 
