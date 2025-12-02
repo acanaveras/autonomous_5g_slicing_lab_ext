@@ -26,7 +26,7 @@ function_groups:
 
     # Phoenix Observability Configuration
     phoenix_enabled: ${PHOENIX_ENABLED:-true}
-    phoenix_endpoint: ${PHOENIX_ENDPOINT:-http://localhost:6006}
+    phoenix_endpoint: ${PHOENIX_ENDPOINT:-http://0.0.0.0:6006}
     phoenix_project_name: ${PHOENIX_PROJECT_NAME:-5g-network-agent}
     phoenix_service_name: ${PHOENIX_SERVICE_NAME:-nat-5g-agent}
     phoenix_environment: ${PHOENIX_ENVIRONMENT:-production}
