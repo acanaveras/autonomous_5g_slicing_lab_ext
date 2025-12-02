@@ -35,7 +35,7 @@ validation_mode: strict
 
 # Phoenix Observability Configuration
 phoenix_enabled: true
-phoenix_endpoint: http://localhost:6006
+phoenix_endpoint: http://0.0.0.0:6006
 ...
 ```
 
@@ -52,7 +52,7 @@ nat serve \
 ```
 Performance profiler initialized
 Guardrails initialized with mode: strict
-Phoenix observability enabled: http://localhost:6006
+Phoenix observability enabled: http://0.0.0.0:6006
 NAT server started on port 4999
 ```
 
@@ -196,14 +196,14 @@ phoenix serve
 ### Access Phoenix UI
 
 ```
-http://localhost:6006
+http://0.0.0.0:6006
 ```
 
 ### Enable Phoenix in NAT
 
 ```bash
 export PHOENIX_ENABLED=true
-export PHOENIX_ENDPOINT=http://localhost:6006
+export PHOENIX_ENDPOINT=http://0.0.0.0:6006
 
 nat serve --config_file config.yml --port 4999
 ```
@@ -253,7 +253,7 @@ export GUARDRAILS_ENABLED=false
 **Solution:**
 1. Check if Phoenix is running:
    ```bash
-   curl http://localhost:6006/health
+   curl http://0.0.0.0:6006/health
    ```
 
 2. If not, start it:
@@ -278,7 +278,7 @@ export GUARDRAILS_ENABLED=false
 | `SLOW_WARNING_THRESHOLD_MS` | `5000` | Threshold for slow warnings (ms) |
 | `PROFILING_OUTPUT_DIR` | `./profiles` | Profiling reports directory |
 | `PHOENIX_ENABLED` | `true` | Enable Phoenix tracing |
-| `PHOENIX_ENDPOINT` | `http://localhost:6006` | Phoenix server URL |
+| `PHOENIX_ENDPOINT` | `http://0.0.0.0:6006` | Phoenix server URL |
 
 ---
 

@@ -121,7 +121,7 @@ class NetworkManagementToolsConfig(FunctionGroupBaseConfig, name="network_tools"
         description="Enable Phoenix observability"
     )
     phoenix_endpoint: str = Field(
-        default="http://localhost:6006",
+        default="http://0.0.0.0:6006",
         description="Phoenix server endpoint"
     )
     phoenix_project_name: str = Field(
