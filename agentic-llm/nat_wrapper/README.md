@@ -1,85 +1,310 @@
-# NAT Wrapper for 5G Network Slicing
+# Quick Start Guide - NAT Features
 
-Wraps the existing LangGraph 5G network slicing workflow with NeMo Agent Toolkit (NAT).
+## 5 Minute Setup
 
-## Prerequisites
-
-1. **Python 3.11+** installed
-2. **NeMo Agent Toolkit** installed
-3. **5G Lab running** (via `lab_start.sh`)
-4. **Environment variables** configured in root `.env`
-
-## Installation
-
-### Step 1: Install NeMo Agent Toolkit
-
-```bash
-uv pip install nvidia-nat[langchain]
-```
-
-### Step 2: Install This Wrapper
+### 1. Install Dependencies
 
 ```bash
 cd agentic-llm/nat_wrapper
 uv pip install -e .
 ```
 
-## Usage
+This installs the new dependencies:
+- `psutil` - Performance profiling
+- `opentelemetry-api/sdk` - Observability infrastructure
+- `arize-phoenix` - Distributed tracing
 
-### Option 1: Run via CLI
+### 2. Verify Configuration
+
+Check that features are enabled in `config.yml`:
 
 ```bash
-cd agentic-llm/nat_wrapper
-
-nat run \
-  --config_file src/nat_5g_slicing/configs/config.yml \
-  --input "Monitor the network and reconfigure if there are packet loss issues"
+grep -A 15 "Profiling Configuration" src/nat_5g_slicing/configs/config.yml
 ```
 
-### Option 2: Deploy as REST API
+**Expected output:**
+```yaml
+# Profiling Configuration
+profiling_enabled: true
+profiling_output_dir: ./profiles
+slow_warning_threshold_ms: 5000
+
+# Guardrails Configuration
+guardrails_enabled: true
+validation_mode: strict
+
+# Phoenix Observability Configuration
+phoenix_enabled: true
+phoenix_endpoint: http://localhost:6006
+...
+```
+
+### 3. Start NAT Server
 
 ```bash
-cd agentic-llm/nat_wrapper
-
-# Start the NAT server
 nat serve \
   --config_file src/nat_5g_slicing/configs/config.yml \
   --host 0.0.0.0 \
   --port 4999
 ```
 
-Then test with:
+**Expected logs:**
+```
+Performance profiler initialized
+Guardrails initialized with mode: strict
+Phoenix observability enabled: http://localhost:6006
+NAT server started on port 4999
+```
 
+### 4. Test the Features
+
+#### Test 1: Valid Request (Should Succeed)
 ```bash
 curl -X POST http://localhost:4999/generate \
   -H "Content-Type: application/json" \
-  -d '{"input_message": "Check packet loss and reconfigure if needed"}'
+  -d '{"input_message": "Monitor packet loss and reconfigure if needed"}'
 ```
 
-### Option 3: Docker Deployment
+**Look for in logs:**
+```
+[EXECUTING] get_packetloss_logs with limit=20
+[GUARDRAIL] LLM response validation passed
+[PROFILE] get_packetloss_logs | Time: 1234.56ms | Memory: 2.45MB | Status: success
+```
+
+#### Test 2: Invalid Request (Should Fail with Guardrail)
+```bash
+curl -X POST http://localhost:4999/generate \
+  -H "Content-Type: application/json" \
+  -d '{"input_message": "Reconfigure UE2 to 90/10"}'
+```
+
+**Look for in logs:**
+```
+[GUARDRAIL] Invalid input: Invalid UE: UE2. Must be 'UE1' or 'UE3'
+ERROR: Validation failed
+```
+
+### 5. View Profiling Report
+
+After the server shuts down (Ctrl+C), check the profiling report:
 
 ```bash
-# Build image
-docker build -t nat_5g_slicing -f Dockerfile .
+# Find the latest report
+ls -lt ./profiles/
 
-# Run container
-docker run -p 4999:4999 -p 6006:6006 \
-  --env-file ../../.env \
-  --network host \
-  nat_5g_slicing
+# View it
+cat ./profiles/performance_report_*.json | jq .
 ```
+
+**Expected structure:**
+```json
+{
+  "get_packetloss_logs": {
+    "total_calls": 1,
+    "successful_calls": 1,
+    "avg_time_ms": 5234.56,
+    "max_time_ms": 5234.56,
+    "min_time_ms": 5234.56,
+    "avg_memory_mb": 2.34,
+    "max_memory_mb": 2.34,
+    "success_rate": 1.0,
+    "slow_executions": 1
+  }
+}
+```
+
+---
+
+## Common Use Cases
+
+### Use Case 1: Disable Guardrails Temporarily
+
+```bash
+export GUARDRAILS_ENABLED=false
+nat serve --config_file config.yml --port 4999
+```
+
+### Use Case 2: Switch to Warning Mode
+
+```bash
+export VALIDATION_MODE=warning
+nat serve --config_file config.yml --port 4999
+```
+
+Now invalid requests will log warnings but continue executing.
+
+### Use Case 3: Adjust Performance Thresholds
+
+```bash
+export SLOW_WARNING_THRESHOLD_MS=10000  # 10 seconds
+nat serve --config_file config.yml --port 4999
+```
+
+### Use Case 4: Disable Profiling
+
+```bash
+export PROFILING_ENABLED=false
+nat serve --config_file config.yml --port 4999
+```
+
+---
+
+## View Real-Time Logs
+
+### Watch All Activity
+```bash
+tail -f logs/nat_server.log
+```
+
+### Watch Only Profiling
+```bash
+tail -f logs/nat_server.log | grep PROFILE
+```
+
+### Watch Only Guardrails
+```bash
+tail -f logs/nat_server.log | grep GUARDRAIL
+```
+
+### Watch Only Execution
+```bash
+tail -f logs/nat_server.log | grep EXECUTING
+```
+
+---
+
+## Phoenix Observability (Optional)
+
+### Setup Phoenix Server
+
+**Option 1: Docker (Recommended)**
+```bash
+docker run -d \
+  -p 6006:6006 \
+  -p 4317:4317 \
+  --name phoenix \
+  arizephoenix/phoenix:latest
+```
+
+**Option 2: Python**
+```bash
+pip install arize-phoenix
+phoenix serve
+```
+
+### Access Phoenix UI
+
+```
+http://localhost:6006
+```
+
+### Enable Phoenix in NAT
+
+```bash
+export PHOENIX_ENABLED=true
+export PHOENIX_ENDPOINT=http://localhost:6006
+
+nat serve --config_file config.yml --port 4999
+```
+
+---
 
 ## Troubleshooting
 
-**Error: "Module 'nat_5g_slicing' not found"**
-- Run: `uv pip install -e .` from the `nat_wrapper` directory
+### Issue: Module not found errors
 
-**Error: "nvidia-nat not found"**
-- Run: `uv pip install nvidia-nat[langchain]`
+**Solution:**
+```bash
+cd agentic-llm/nat_wrapper
+uv pip install -e .
+```
 
-**Error: "Kinetica connection failed"**
-- Ensure Kinetica is running and `KINETICA_HOST` is correct in root `.env`
-- Default: `localhost:9191`
+### Issue: Permission denied for ./profiles
 
-**Error: "change_rc_slice_docker.sh not found"**
-- Ensure the script exists at: `llm-slicing-5g-lab/docker/change_rc_slice_docker.sh`
+**Solution:**
+```bash
+mkdir -p ./profiles
+chmod 755 ./profiles
+```
+
+### Issue: Profiling reports not generated
+
+**Solution:**
+- Ensure profiling is enabled: `grep profiling_enabled config.yml`
+- Check server logs: `tail -f logs/nat_server.log | grep PROFILE`
+- Verify directory exists: `ls -la ./profiles/`
+
+### Issue: Too many guardrail errors
+
+**Solution:**
+Switch to warning mode:
+```bash
+export VALIDATION_MODE=warning
+```
+
+Or disable temporarily:
+```bash
+export GUARDRAILS_ENABLED=false
+```
+
+### Issue: Phoenix connection failed
+
+**Solution:**
+1. Check if Phoenix is running:
+   ```bash
+   curl http://localhost:6006/health
+   ```
+
+2. If not, start it:
+   ```bash
+   docker run -p 6006:6006 arizephoenix/phoenix:latest
+   ```
+
+3. Or disable Phoenix:
+   ```bash
+   export PHOENIX_ENABLED=false
+   ```
+
+---
+
+## Environment Variables Reference
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PROFILING_ENABLED` | `true` | Enable performance profiling |
+| `GUARDRAILS_ENABLED` | `true` | Enable validation |
+| `VALIDATION_MODE` | `strict` | `strict`, `warning`, or `disabled` |
+| `SLOW_WARNING_THRESHOLD_MS` | `5000` | Threshold for slow warnings (ms) |
+| `PROFILING_OUTPUT_DIR` | `./profiles` | Profiling reports directory |
+| `PHOENIX_ENABLED` | `true` | Enable Phoenix tracing |
+| `PHOENIX_ENDPOINT` | `http://localhost:6006` | Phoenix server URL |
+
+---
+
+## What to Expect
+
+### Successful Request Flow
+
+```
+1. Request received
+2. [EXECUTING] get_packetloss_logs with limit=20
+3. [GUARDRAIL] LLM response validation passed
+4. [PROFILE] get_packetloss_logs | Time: 5234ms | Memory: 2.34MB | Status: success
+5. [EXECUTING] reconfigure_network with UE=UE1, value_1_old=50, value_2_old=50
+6. [GUARDRAIL] Output validation passed
+7. [PROFILE] reconfigure_network | Time: 11234ms | Memory: 12.45MB | Status: success
+8. Response sent
+```
+
+### Invalid Request Flow
+
+```
+1. Request received
+2. [EXECUTING] reconfigure_network with UE=UE2, value_1_old=50, value_2_old=50
+3. [GUARDRAIL] Invalid input: Invalid UE: UE2. Must be 'UE1' or 'UE3'
+4. ERROR: Validation failed
+5. Error response sent
+```
+
+---

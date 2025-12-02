@@ -33,6 +33,7 @@ Once the lab is running, you can access the following services:
 | 9001 | InfluxDB            | Time-series database           |
 | 8080 | Kinetica Admin      | Kinetica admin console         |
 | 8000 | Kinetica Workbench  | Kinetica workbench interface   |
+| 6006 | Phoenix Telemetry   | AI observability and tracing   |
 | 4999 | NAT REST API        | NeMo Agent Toolkit server      |
 
 **Login Credentials:**
@@ -43,6 +44,7 @@ Once the lab is running, you can access the following services:
 | InfluxDB            | http://localhost:9001        | admin    | adminpassword | -                              |
 | Kinetica Admin      | http://localhost:8080        | admin    | admin         | -                              |
 | Kinetica Workbench  | http://localhost:8000        | admin    | admin         | -                              |
+| Phoenix Telemetry   | http://localhost:6006        | -        | -             | AI observability, distributed tracing, and performance monitoring |
 | NAT REST API        | http://localhost:4999/docs   | -        | -             | OpenAPI/Swagger UI for network management tools |
 | Streamlit           | http://localhost:8501        | -        | -             | Click "Start Monitoring" button. **Note:** Agent stops after 30 reconfigurations and requires manual restart (configurable in `agentic-llm/config.yaml`)|
 
