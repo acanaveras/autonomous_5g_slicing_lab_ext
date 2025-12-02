@@ -125,6 +125,57 @@ if [ -f "$ROOT_DIR/requirements.txt" ]; then
 else
     log_warning "requirements.txt not found in parent directory"
 fi
+
+# --- NAT Wrapper Installation ---
+log "Installing NAT (NeMo Agent Toolkit) wrapper..."
+
+# Install uv if not present (faster package installer)
+if ! command -v uv &>/dev/null; then
+    log "Installing uv package manager..."
+    pip3 install uv 2>&1 | tee -a "$LOG_FILE"
+    if [ $? -eq 0 ]; then
+        log_success "uv installed"
+    else
+        log_warning "Failed to install uv, falling back to pip"
+    fi
+fi
+
+# Install NVIDIA NAT with LangChain support
+log "Installing nvidia-nat[langchain]..."
+if command -v uv &>/dev/null; then
+    uv pip install nvidia-nat[langchain] 2>&1 | tee -a "$LOG_FILE"
+else
+    pip3 install nvidia-nat[langchain] 2>&1 | tee -a "$LOG_FILE"
+fi
+
+if [ $? -eq 0 ]; then
+    log_success "nvidia-nat[langchain] installed"
+else
+    log_warning "Failed to install nvidia-nat[langchain]"
+fi
+
+# Install NAT wrapper in editable mode
+NAT_WRAPPER_DIR="$ROOT_DIR/agentic-llm/nat_wrapper"
+if [ -d "$NAT_WRAPPER_DIR" ]; then
+    log "Installing nat_5g_slicing wrapper in editable mode..."
+    cd "$NAT_WRAPPER_DIR"
+    if command -v uv &>/dev/null; then
+        uv pip install -e . 2>&1 | tee -a "$LOG_FILE"
+    else
+        pip3 install -e . 2>&1 | tee -a "$LOG_FILE"
+    fi
+    
+    if [ $? -eq 0 ]; then
+        log_success "nat_5g_slicing wrapper installed"
+    else
+        log_warning "Failed to install nat_5g_slicing wrapper"
+    fi
+    cd "$SCRIPT_DIR"
+else
+    log_warning "NAT wrapper directory not found at $NAT_WRAPPER_DIR, skipping..."
+fi
+# --- END NAT Wrapper Installation ---
+
 echo ""
 
 # Step 3: Build RIC and OAI Network Elements (if not already built)
