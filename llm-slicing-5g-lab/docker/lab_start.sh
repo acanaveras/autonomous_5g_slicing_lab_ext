@@ -266,7 +266,9 @@ else
 fi
 echo ""
 
-# Step 13: Start UE (Slice 1 only for now due to TUN interface limitation)
+# Step 13: Start UE (Slice 1)
+# Note: Running multiple UEs in Docker host mode with RF simulator causes conflicts
+# For production, use network namespaces or separate RF simulator instances
 log "Step 13: Starting UE (Slice 1)..."
 docker compose -f docker-compose-ue-host.yaml up -d oai-ue-slice1 2>&1 | tee -a "$LOG_FILE"
 wait_for_healthy "oai-ue-slice1" 60
@@ -382,8 +384,48 @@ fi
 cd docker
 echo ""
 
-# Step 18: Display system status
-log "Step 18: System Status Summary"
+# Step 18: Start AI Agents (LangGraph)
+log "Step 18: Starting AI Agents for autonomous network slicing..."
+cd "$ROOT_DIR/agentic-llm"
+
+# Create logs directory for agents with correct permissions
+mkdir -p logs
+sudo chmod 777 logs 2>/dev/null || chmod 777 logs
+# Create agent.log with write permissions for all users
+touch logs/agent.log 2>/dev/null || sudo touch logs/agent.log
+sudo chmod 666 logs/agent.log 2>/dev/null || chmod 666 logs/agent.log
+
+# Kill any existing agent process
+pkill -f "langgraph_agent.py" 2>/dev/null || true
+sleep 1
+
+# Clear Python cache to ensure latest code is loaded
+find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+
+# Start AI agents in background
+AGENT_SCRIPT_LOG="$LOG_DIR/langgraph_agent.log"
+if nohup python3 langgraph_agent.py > "$AGENT_SCRIPT_LOG" 2>&1 &
+then
+    AGENT_PID=$!
+    sleep 3
+
+    # Verify agent is still running
+    if kill -0 $AGENT_PID 2>/dev/null; then
+        log_success "AI Agents started (PID: $AGENT_PID)"
+        log "Agent log: logs/agent.log"
+        log "Agent script log: $AGENT_SCRIPT_LOG"
+    else
+        log_error "AI Agents failed to start, check $AGENT_SCRIPT_LOG for errors"
+    fi
+else
+    log_error "Failed to start AI Agents"
+fi
+
+cd "$SCRIPT_DIR"
+echo ""
+
+# Step 19: Display system status
+log "Step 19: System Status Summary"
 echo ""
 echo "Running Containers:"
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "NAME|oai-|flexric|influx|grafana|kinetica|streamlit"
@@ -413,10 +455,16 @@ echo "  - iperf3 servers running on: oai-ext-dn (192.168.70.135:5201, 5202)"
 echo "  - Stop traffic: pkill -f generate_traffic.py"
 echo ""
 echo "Monitoring & Visualization:"
-echo "  - Streamlit UI: http://localhost:8501"
+echo "  - Streamlit UI: http://localhost:8501 (click 'Start Monitoring' to view AI agent logs)"
 echo "  - Grafana: http://localhost:9002 (admin/admin)"
 echo "  - InfluxDB: http://localhost:9001"
 echo "  - Kinetica Workbench: http://localhost:8000 (admin/admin)"
+echo ""
+echo "AI Agents (Autonomous Network Slicing):"
+echo "  - Agent logs: tail -f ../agentic-llm/logs/agent.log"
+echo "  - Agent script log: tail -f $AGENT_SCRIPT_LOG"
+echo "  - Agents monitor packet loss and automatically reconfigure network slices"
+echo "  - Packet loss threshold: 1.5%, Check interval: 10 seconds"
 echo ""
 echo "NOTE: It may take 30-60 seconds for traffic data to appear in Grafana/Streamlit"
 echo ""

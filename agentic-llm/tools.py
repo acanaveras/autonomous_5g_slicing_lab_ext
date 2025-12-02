@@ -70,23 +70,44 @@ def reconfigure_network(UE: str, value_1_old: int, value_2_old: int):
        args_2 = ["20","80"]
  
     try:
-        result = subprocess.run([script_path] + args_1, check=True, text=True, capture_output=True)
-        logging.info("\nScript output args_1:\n")
+        logging.info(f"\n🔄 Running reconfiguration step 1 with args: {args_1}\n")
+        result = subprocess.run([script_path] + args_1, check=True, text=True, capture_output=True, timeout=30)
+        logging.info("\n✅ Script output args_1:\n")
         logging.info(result.stdout)
+        if result.stderr:
+            logging.info("Script stderr args_1:")
+            logging.info(result.stderr)
+
         if args_2!=None:
-          result = subprocess.run([script_path] + args_2, check=True, text=True, capture_output=True)
-          logging.info("\nScript output args_2:\n")
+          logging.info(f"\n🔄 Running reconfiguration step 2 with args: {args_2}\n")
+          result = subprocess.run([script_path] + args_2, check=True, text=True, capture_output=True, timeout=30)
+          logging.info("\n✅ Script output args_2:\n")
           logging.info(result.stdout)
+          if result.stderr:
+              logging.info("Script stderr args_2:")
+              logging.info(result.stderr)
 
         time.sleep(10)
-        logging.info("\n Wait for reconfiguration to kick in \n")
+        logging.info("\n⏳ Wait for reconfiguration to kick in \n")
         if args_2 != None:
             return str(args_2)
 
         return str(args_1)
+    except subprocess.TimeoutExpired as e:
+        logging.info(f"\n❌ Error: Script timed out after 30 seconds\n")
+        logging.info(f"Command: {e.cmd}\n")
+        if e.stdout:
+            logging.info(f"Stdout before timeout:\n{e.stdout}\n")
+        if e.stderr:
+            logging.info(f"Stderr before timeout:\n{e.stderr}\n")
+        return "Reconfiguration unsuccessful - timeout"
     except subprocess.CalledProcessError as e:
-        logging.info("Error occurred:")
-        logging.info(e.stderr)
+        logging.info(f"\n❌ Error occurred during reconfiguration:\n")
+        logging.info(f"Return code: {e.returncode}\n")
+        if e.stdout:
+            logging.info(f"Stdout:\n{e.stdout}\n")
+        if e.stderr:
+            logging.info(f"Stderr:\n{e.stderr}\n")
         return "Reconfiguration unsuccessful"
 
 

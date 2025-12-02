@@ -31,10 +31,25 @@ if [ -n "$1" ] &&  [ -n "$2" ]; then
   #  exit()
   #fi
 
-  export SLICE1_RATIO=$1
-  export SLICE2_RATIO=$2
+  SLICE1_RATIO=$1
+  SLICE2_RATIO=$2
 else
   echo "You did not specify the slicing ratios, using default 80:20"
+  SLICE1_RATIO=80
+  SLICE2_RATIO=20
 fi
 
-./flexric/build/examples/xApp/c/ctrl/xapp_rc_slice_dynamic
+# Create custom xApp config inside FlexRIC container (if not exists)
+docker exec flexric bash -c 'cat > /tmp/xapp_flexric.conf << "EOF"
+[NEAR-RIC]
+NEAR_RIC_IP = 127.0.0.1
+
+[XAPP]
+DB_DIR = /tmp/
+EOF'
+
+# Run xApp inside FlexRIC container with environment variables
+docker exec -e SLICE1_RATIO=$SLICE1_RATIO -e SLICE2_RATIO=$SLICE2_RATIO \
+  flexric /usr/local/bin/xapp_rc_slice_dynamic \
+  -c /tmp/xapp_flexric.conf \
+  -p /usr/local/lib/flexric/

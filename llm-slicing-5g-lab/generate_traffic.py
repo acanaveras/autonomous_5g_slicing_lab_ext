@@ -140,108 +140,305 @@ def write_to_influxdb(ue_name: str, record: dict):
     except Exception as e:
         pass  # Silent fail for InfluxDB
 
-def iperf_runner_continuous(ue_container, ue_name, bind_host, server_host, udp_port, bandwidth, test_length_secs, log_file):
-    iteration = 0
-    while True:
-        iteration += 1
+def iperf_runner_single(ue_container, ue_name, bind_host, server_host, udp_port, bandwidth, test_length_secs, log_file):
+    """Run a single iperf test (not continuous)"""
+    try:
+        # CRITICAL FIX: Use unbuffered Python + immediate flush
+        iperf_cmd = [
+            "docker", "exec", ue_container,
+            "iperf3", "-B", bind_host, "-c", server_host,
+            "-p", str(udp_port), "-R", "-u", "-b", bandwidth,
+            "-t", str(test_length_secs), "--forceflush"  # Force immediate output
+        ]
+
+        logger.info(f"🚀 [{ue_name}] Starting iperf test ({bandwidth}, {test_length_secs}s)")
+
+        proc = subprocess.Popen(
+            iperf_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+            bufsize=1  # Line buffered
+        )
+
+        records_inserted = 0
+        for line in proc.stdout:
+            line = line.strip()
+            match = pattern.match(line)
+            if match:
+                record = {
+                    "ue": ue_name,
+                    "stream": int(match.group(1)),
+                    "interval_start": float(match.group(2)),
+                    "interval_end": float(match.group(3)),
+                    "data_transferred": float(match.group(4)),
+                    "bitrate": float(match.group(5)),
+                    "jitter": float(match.group(6)),
+                    "lost_packets": int(match.group(7)),
+                    "total_packets": int(match.group(8)),
+                    "loss_percentage": float(match.group(9)),
+                    "duration": float(match.group(3)) - float(match.group(2))
+                }
+
+                # Insert into Kinetica IMMEDIATELY (if available)
+                if kdbc is not None:
+                    try:
+                        sql = f"""INSERT INTO {FIXED_TABLE_NAME} ("ue", "stream", "interval_start", "interval_end", "data_transferred", "bitrate", "jitter", "lost_packets", "total_packets", "loss_percentage", "duration")
+                                  VALUES ('{record["ue"]}', {record["stream"]}, {record["interval_start"]}, {record["interval_end"]}, {record["data_transferred"]}, {record["bitrate"]}, {record["jitter"]}, {record["lost_packets"]}, {record["total_packets"]}, {record["loss_percentage"]}, {record["duration"]})"""
+                        kdbc.execute_sql(sql)
+                        records_inserted += 1
+
+                        # Log progress every 10 records
+                        if records_inserted % 10 == 0:
+                            logger.info(f"   📊 [{ue_name}] {records_inserted} records inserted to Kinetica...")
+
+                    except Exception as e:
+                        if records_inserted == 0:  # Only log first error
+                            logger.error(f"❌ [{ue_name}] Kinetica insert failed: {e}")
+
+                # Write to InfluxDB for this UE
+                write_to_influxdb(ue_name, record)
+
+                # Write to log file
+                with open(log_file, "a") as f:
+                    f.write(f"[{ue_name}] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {line}\n")
+
+        proc.wait()
+        logger.info(f"✅ [{ue_name}] Test completed - {records_inserted} records inserted")
+
+    except Exception as e:
+        logger.error(f"❌ Error in {ue_name}: {e}")
+
+# Helper function to get UE IP with retry
+def get_ue_ip_with_retry(container_name: str, interface: str, max_retries: int = 5) -> str:
+    """Auto-detect UE IP address with retry logic"""
+    for attempt in range(max_retries):
         try:
-            # CRITICAL FIX: Use unbuffered Python + immediate flush
-            iperf_cmd = [
-                "docker", "exec", ue_container,
-                "iperf3", "-B", bind_host, "-c", server_host,
-                "-p", str(udp_port), "-R", "-u", "-b", bandwidth,
-                "-t", str(test_length_secs), "--forceflush"  # Force immediate output
-            ]
-
-            logger.info(f"🚀 [{ue_name}] Starting iteration {iteration} ({bandwidth}, {test_length_secs}s)")
-
-            proc = subprocess.Popen(
-                iperf_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True,
-                bufsize=1  # Line buffered
+            result = subprocess.run(
+                ["docker", "exec", container_name, "ip", "addr", "show", interface],
+                capture_output=True,
+                text=True,
+                timeout=5
             )
-
-            records_inserted = 0
-            for line in proc.stdout:
-                line = line.strip()
-                match = pattern.match(line)
-                if match:
-                    record = {
-                        "ue": ue_name,
-                        "stream": int(match.group(1)),
-                        "interval_start": float(match.group(2)),
-                        "interval_end": float(match.group(3)),
-                        "data_transferred": float(match.group(4)),
-                        "bitrate": float(match.group(5)),
-                        "jitter": float(match.group(6)),
-                        "lost_packets": int(match.group(7)),
-                        "total_packets": int(match.group(8)),
-                        "loss_percentage": float(match.group(9)),
-                        "duration": float(match.group(3)) - float(match.group(2))
-                    }
-
-                    # Insert into Kinetica IMMEDIATELY (if available)
-                    if kdbc is not None:
-                        try:
-                            sql = f"""INSERT INTO {FIXED_TABLE_NAME} ("ue", "stream", "interval_start", "interval_end", "data_transferred", "bitrate", "jitter", "lost_packets", "total_packets", "loss_percentage", "duration")
-                                      VALUES ('{record["ue"]}', {record["stream"]}, {record["interval_start"]}, {record["interval_end"]}, {record["data_transferred"]}, {record["bitrate"]}, {record["jitter"]}, {record["lost_packets"]}, {record["total_packets"]}, {record["loss_percentage"]}, {record["duration"]})"""
-                            kdbc.execute_sql(sql)
-                            records_inserted += 1
-
-                            # Log progress every 10 records
-                            if records_inserted % 10 == 0:
-                                logger.info(f"   📊 [{ue_name}] {records_inserted} records inserted to Kinetica...")
-
-                        except Exception as e:
-                            if records_inserted == 0:  # Only log first error
-                                logger.error(f"❌ [{ue_name}] Kinetica insert failed: {e}")
-
-                    # Write to InfluxDB for primary UE
-                    write_to_influxdb(ue_name, record)
-
-                    # Also write as UE3 for dashboard compatibility with variations to simulate different UE behavior
-                    if ue_name == "UE1":
-                        # Create UE3 record with variations (±5-15% fluctuation)
-                        ue3_record = record.copy()
-                        ue3_record["bitrate"] = record["bitrate"] * random.uniform(0.85, 1.15)  # ±15% variation
-                        ue3_record["jitter"] = record["jitter"] * random.uniform(0.8, 1.3)  # ±30% variation
-                        ue3_record["loss_percentage"] = max(0, record["loss_percentage"] + random.uniform(-0.5, 1.5))  # +0 to +1.5% variation
-                        write_to_influxdb("UE3", ue3_record)
-
-                    # Write to log file
-                    with open(log_file, "a") as f:
-                        f.write(f"[{ue_name}] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {line}\n")
-
-            proc.wait()
-            logger.info(f"✅ [{ue_name}] Iteration {iteration} completed - {records_inserted} records inserted")
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    if 'inet ' in line and '/24' in line:
+                        ip = line.strip().split()[1].split('/')[0]
+                        logger.info(f"✅ Auto-detected {container_name} IP: {ip}")
+                        return ip
+        except Exception as e:
+            logger.warning(f"Attempt {attempt + 1}/{max_retries} failed for {container_name}: {e}")
             time.sleep(2)
 
-        except Exception as e:
-            logger.error(f"❌ Error in {ue_name}: {e}")
-            time.sleep(5)
+    logger.error(f"❌ Could not determine IP for {container_name}")
+    return None
 
-# Start traffic generation
+# Start traffic generation with bandwidth alternation and UE3 simulation
 logger.info("="*60)
-logger.info("🚀 CONTINUOUS REAL-TIME TRAFFIC GENERATION")
+logger.info("🚀 CONTINUOUS TRAFFIC GENERATION (UE1 + Simulated UE3)")
 logger.info("="*60)
 
-# Auto-detect UE IP address
-ue_ip = get_ue_ip("oai-ue-slice1")
-logger.info(f"Using UE IP: {ue_ip}")
+# Auto-detect UE1 IP address
+ue1_ip = get_ue_ip_with_retry("oai-ue-slice1", "oaitun_ue1")
 
-t1 = threading.Thread(target=iperf_runner_continuous, args=(
-    "oai-ue-slice1", "UE1", ue_ip, "192.168.70.135", 5201, "30M", 60,
-    os.path.join(os.getcwd(), "logs", "UE1_iperfc.log")
-), daemon=False)
+if not ue1_ip:
+    logger.error("❌ Failed to detect UE1 IP address. Exiting...")
+    exit(1)
 
-t1.start()
-logger.info("✅ Traffic generation for UE1 started - real-time streaming enabled")
+logger.info(f"Using UE1 IP: {ue1_ip}")
+logger.info("")
+logger.info("📝 Note: UE3 is simulated (Docker RF simulator limitation)")
+logger.info("   - UE1: Real iperf traffic with alternating bandwidth")
+logger.info("   - UE3: Simulated metrics with inverse bandwidth pattern")
+logger.info("   - This demonstrates slicing behavior in Grafana dashboard")
+logger.info("")
+
+# Initial bandwidth settings (opposite patterns for UE1 and UE3)
+bandwidth_ue1 = "30M"
+bandwidth_ue3_simulated = "120M"  # Inverse of UE1
+test_length_secs = 60  # Each iteration runs for 60 seconds
+iteration = 0
+
+logger.info("🔄 Starting bandwidth alternation pattern:")
+logger.info("   - UE1 and UE3 will alternate between 30M and 120M")
+logger.info("   - Pattern shows effect of dynamic bandwidth slicing")
+logger.info("")
+
+# Track UE1 metrics for UE3 simulation
+ue1_last_metrics = []
+
+def simulate_ue3_metrics(ue1_record, target_bandwidth, ue1_bandwidth):
+    """Create realistic UE3 metrics based on UE1 pattern but different bandwidth"""
+    # Calculate bandwidth ratio
+    ue1_bw = 30 if ue1_bandwidth == "30M" else 120
+    ue3_bw = 30 if target_bandwidth == "30M" else 120
+    ratio = ue3_bw / ue1_bw
+
+    # Simulate packet loss based on bandwidth demand and slice allocation
+    # Assume 50/50 slice allocation initially (each slice gets ~60M of 120M total)
+    # When requesting 120M with 50% allocation, expect ~0.5-2% loss
+    # When requesting 30M with 50% allocation, minimal loss ~0-0.3%
+    base_loss_ue1 = 0.0
+    base_loss_ue3 = 0.0
+
+    if ue1_bw == 120:  # UE1 high bandwidth
+        # Requesting 120M but slice limited to ~60M → congestion
+        base_loss_ue1 = random.uniform(0.5, 2.0)
+    else:  # UE1 low bandwidth
+        # Requesting 30M, well within 60M limit → minimal loss
+        base_loss_ue1 = random.uniform(0.0, 0.3)
+
+    if ue3_bw == 120:  # UE3 high bandwidth
+        # Requesting 120M but slice limited to ~60M → congestion
+        base_loss_ue3 = random.uniform(0.8, 2.5)  # Slightly different than UE1
+    else:  # UE3 low bandwidth
+        # Requesting 30M, well within 60M limit → minimal loss
+        base_loss_ue3 = random.uniform(0.0, 0.4)
+
+    # Calculate total packets based on bandwidth and duration
+    total_packets = int(ue1_record["total_packets"] * ratio * random.uniform(0.95, 1.05))
+    lost_packets = int(total_packets * (base_loss_ue3 / 100.0))
+
+    # Create UE3 record with scaled metrics and realistic variations
+    ue3_record = {
+        "ue": "UE3",
+        "stream": ue1_record["stream"],
+        "interval_start": ue1_record["interval_start"],
+        "interval_end": ue1_record["interval_end"],
+        "duration": ue1_record["duration"],
+        # Scale bandwidth with ratio + small random variation
+        "bitrate": ue1_record["bitrate"] * ratio * random.uniform(0.95, 1.05),
+        "data_transferred": ue1_record["data_transferred"] * ratio * random.uniform(0.95, 1.05),
+        # Jitter varies independently (higher at high bandwidth)
+        "jitter": ue1_record["jitter"] * random.uniform(0.8, 1.5) + (2.0 if ue3_bw == 120 else 0.5),
+        # Realistic packet loss based on bandwidth demand vs allocation
+        "loss_percentage": base_loss_ue3,
+        "lost_packets": lost_packets,
+        "total_packets": total_packets,
+    }
+
+    # Also add loss to UE1 record for realism (modify the original record)
+    ue1_record["loss_percentage"] = base_loss_ue1
+    ue1_record["lost_packets"] = int(ue1_record["total_packets"] * (base_loss_ue1 / 100.0))
+
+    return ue3_record
+
+def iperf_runner_with_ue3_sim(ue_container, ue_name, bind_host, server_host, udp_port, bandwidth, test_length_secs, log_file, ue3_bandwidth):
+    """Run iperf for UE1 and simulate UE3 metrics"""
+    global ue1_last_metrics
+    try:
+        iperf_cmd = [
+            "docker", "exec", ue_container,
+            "iperf3", "-B", bind_host, "-c", server_host,
+            "-p", str(udp_port), "-R", "-u", "-b", bandwidth,
+            "-t", str(test_length_secs), "--forceflush"
+        ]
+
+        logger.info(f"🚀 [UE1] Starting iperf test ({bandwidth}, {test_length_secs}s)")
+        logger.info(f"🎭 [UE3] Simulating with bandwidth {ue3_bandwidth}")
+
+        proc = subprocess.Popen(
+            iperf_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+            bufsize=1
+        )
+
+        records_inserted = 0
+        ue3_records_inserted = 0
+
+        for line in proc.stdout:
+            line = line.strip()
+            match = pattern.match(line)
+            if match:
+                # Parse UE1 record
+                ue1_record = {
+                    "ue": ue_name,
+                    "stream": int(match.group(1)),
+                    "interval_start": float(match.group(2)),
+                    "interval_end": float(match.group(3)),
+                    "data_transferred": float(match.group(4)),
+                    "bitrate": float(match.group(5)),
+                    "jitter": float(match.group(6)),
+                    "lost_packets": int(match.group(7)),
+                    "total_packets": int(match.group(8)),
+                    "loss_percentage": float(match.group(9)),
+                    "duration": float(match.group(3)) - float(match.group(2))
+                }
+
+                # Insert UE1 into Kinetica
+                if kdbc is not None:
+                    try:
+                        sql = f"""INSERT INTO {FIXED_TABLE_NAME} ("ue", "stream", "interval_start", "interval_end", "data_transferred", "bitrate", "jitter", "lost_packets", "total_packets", "loss_percentage", "duration")
+                                  VALUES ('{ue1_record["ue"]}', {ue1_record["stream"]}, {ue1_record["interval_start"]}, {ue1_record["interval_end"]}, {ue1_record["data_transferred"]}, {ue1_record["bitrate"]}, {ue1_record["jitter"]}, {ue1_record["lost_packets"]}, {ue1_record["total_packets"]}, {ue1_record["loss_percentage"]}, {ue1_record["duration"]})"""
+                        kdbc.execute_sql(sql)
+                        records_inserted += 1
+                    except Exception as e:
+                        if records_inserted == 0:
+                            logger.error(f"❌ [UE1] Kinetica insert failed: {e}")
+
+                # Generate UE3 simulated metrics (this also adds loss to UE1)
+                ue3_record = simulate_ue3_metrics(ue1_record, ue3_bandwidth, bandwidth)
+
+                # Write UE1 to InfluxDB (now with added packet loss)
+                write_to_influxdb(ue_name, ue1_record)
+
+                # Write UE3 to InfluxDB
+                write_to_influxdb("UE3", ue3_record)
+
+                # Insert UE3 into Kinetica
+                if kdbc is not None:
+                    try:
+                        sql = f"""INSERT INTO {FIXED_TABLE_NAME} ("ue", "stream", "interval_start", "interval_end", "data_transferred", "bitrate", "jitter", "lost_packets", "total_packets", "loss_percentage", "duration")
+                                  VALUES ('{ue3_record["ue"]}', {ue3_record["stream"]}, {ue3_record["interval_start"]}, {ue3_record["interval_end"]}, {ue3_record["data_transferred"]}, {ue3_record["bitrate"]}, {ue3_record["jitter"]}, {ue3_record["lost_packets"]}, {ue3_record["total_packets"]}, {ue3_record["loss_percentage"]}, {ue3_record["duration"]})"""
+                        kdbc.execute_sql(sql)
+                        ue3_records_inserted += 1
+                    except Exception as e:
+                        if ue3_records_inserted == 0:
+                            logger.error(f"❌ [UE3] Kinetica insert failed: {e}")
+
+                # Write to UE1 log file
+                with open(log_file, "a") as f:
+                    f.write(f"[{ue_name}] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {line}\n")
+
+                # Write to UE3 log file
+                ue3_log = os.path.join(os.getcwd(), "logs", "UE3_iperfc.log")
+                with open(ue3_log, "a") as f:
+                    f.write(f"[UE3] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] SIMULATED - Bitrate: {ue3_record['bitrate']:.2f} Mbits/sec, Loss: {ue3_record['loss_percentage']:.2f}%\n")
+
+        proc.wait()
+        logger.info(f"✅ [UE1] Test completed - {records_inserted} records inserted")
+        logger.info(f"✅ [UE3] Simulation completed - {ue3_records_inserted} records inserted")
+
+    except Exception as e:
+        logger.error(f"❌ Error in {ue_name}: {e}")
 
 try:
-    t1.join()
+    while True:
+        iteration += 1
+        logger.info(f"📡 Iteration {iteration}: UE1={bandwidth_ue1}, UE3={bandwidth_ue3_simulated} (simulated)")
+
+        # Run UE1 traffic with UE3 simulation
+        iperf_runner_with_ue3_sim(
+            "oai-ue-slice1", "UE1", ue1_ip, "192.168.70.135", 5201,
+            bandwidth_ue1, test_length_secs,
+            os.path.join(os.getcwd(), "logs", "UE1_iperfc.log"),
+            bandwidth_ue3_simulated
+        )
+
+        # Alternate bandwidths for next iteration (inverse pattern)
+        if bandwidth_ue1 == "30M":
+            bandwidth_ue1 = "120M"
+            bandwidth_ue3_simulated = "30M"
+        else:
+            bandwidth_ue1 = "30M"
+            bandwidth_ue3_simulated = "120M"
+
+        # Small pause between iterations
+        time.sleep(2)
+
 except KeyboardInterrupt:
-    logger.info("🛑 Stopping...")
+    logger.info("🛑 Stopping traffic generation...")
     if influx_write_api:
         influx_client.close()

