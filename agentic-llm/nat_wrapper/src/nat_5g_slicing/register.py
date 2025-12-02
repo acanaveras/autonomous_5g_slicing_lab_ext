@@ -163,7 +163,7 @@ async def network_tools(
             logging.error(f"Reconfiguration failed: {e.stderr}")
             raise ValueError(f"Reconfiguration unsuccessful: {e.stderr}")
 
-    async def _get_packetloss_logs(input: GetPacketlossLogsInput) -> str:
+    async def _get_packetloss_logs(input: GetPacketlossLogsInput = None) -> str:
         """Get packet loss logs from Kinetica database to determine which UE is failing.
         
         Args:
@@ -172,6 +172,9 @@ async def network_tools(
         Returns:
             Formatted string containing recent packet loss data for all UEs
         """
+        if input is None:
+            input = GetPacketlossLogsInput()
+        
         logging.info("Retrieving packet loss logs from Kinetica database")
         
         await asyncio.sleep(5)
