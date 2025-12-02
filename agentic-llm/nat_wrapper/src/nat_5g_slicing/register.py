@@ -190,12 +190,13 @@ async def network_tools(
         """
         
         try:
-            result_df: pd.DataFrame = kdbc.to_df(sql=sql_query)
+            response = kdbc.execute_sql_and_decode(statement=sql_query)
             
-            if result_df is None or result_df.empty:
+            if response and "records" in response and response["records"]:
+                result_df = pd.DataFrame(response["records"])
+                return result_df.to_string(index=False)
+            else:
                 return "WARNING: No packet loss data available at this time. Please try again later."
-            
-            return result_df.to_string(index=False)
             
         except Exception as e:
             logging.error(f"Failed to retrieve packet loss logs: {e}")
