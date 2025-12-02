@@ -14,14 +14,14 @@ Wraps the existing LangGraph 5G network slicing workflow with NeMo Agent Toolkit
 ### Step 1: Install NeMo Agent Toolkit
 
 ```bash
-pip install nvidia-nat[langchain]~=1.4
+uv pip install nvidia-nat[langchain]
 ```
 
 ### Step 2: Install This Wrapper
 
 ```bash
 cd agentic-llm/nat_wrapper
-pip install -e .
+uv pip install -e .
 ```
 
 ## Usage
@@ -72,13 +72,14 @@ docker run -p 4999:4999 -p 6006:6006 \
 ## Troubleshooting
 
 **Error: "Module 'nat_5g_slicing' not found"**
-- Run: `pip install -e .` from the `nat_wrapper` directory
+- Run: `uv pip install -e .` from the `nat_wrapper` directory
 
 **Error: "nvidia-nat not found"**
-- Run: `pip install nvidia-nat[langchain]~=1.4`
+- Run: `uv pip install nvidia-nat[langchain]`
 
 **Error: "Kinetica connection failed"**
-- Ensure Kinetica is running and `KINETICA_HOST` is correct in `.env`
+- Ensure Kinetica is running and `KINETICA_HOST` is correct in root `.env`
+- Default: `localhost:9191`
 
 **Error: "change_rc_slice_docker.sh not found"**
-- Update `RECONFIG_SCRIPT_PATH` in `.env` to the correct path
+- Ensure the script exists at: `llm-slicing-5g-lab/docker/change_rc_slice_docker.sh`
