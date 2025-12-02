@@ -164,9 +164,12 @@ async def network_tools(
 
     load_dotenv(find_dotenv())
 
-    if config.phoenix_enabled:
-        from nat_5g_slicing.phoenix_setup import setup_phoenix_tracing
-        setup_phoenix_tracing(config.phoenix_endpoint)
+    if config.phoenix_enabled and PHOENIX_TRACING_AVAILABLE:
+        try:
+            from nat_5g_slicing.phoenix_setup import setup_phoenix_tracing
+            setup_phoenix_tracing(config.phoenix_endpoint)
+        except Exception as e:
+            logging.warning(f"Failed to setup Phoenix tracing: {e}")
 
     # Initialize profiler if available
     profiler = None

@@ -25,7 +25,9 @@ function_groups:
     validation_mode: ${VALIDATION_MODE:-strict}
 
     # Phoenix Observability Configuration
-    phoenix_enabled: ${PHOENIX_ENABLED:-true}
+    # NOTE: Phoenix is disabled by default due to package compatibility issues
+    # Enable with: export PHOENIX_ENABLED=true (requires compatible Phoenix version)
+    phoenix_enabled: ${PHOENIX_ENABLED:-false}
     phoenix_endpoint: ${PHOENIX_ENDPOINT:-http://0.0.0.0:6006}
     phoenix_project_name: ${PHOENIX_PROJECT_NAME:-5g-network-agent}
     phoenix_service_name: ${PHOENIX_SERVICE_NAME:-nat-5g-agent}
