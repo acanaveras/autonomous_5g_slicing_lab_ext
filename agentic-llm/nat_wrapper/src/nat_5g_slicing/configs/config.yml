@@ -15,6 +15,22 @@ function_groups:
     iperf_table_name: ${IPERF3_RANDOM_TABLE_NAME:-nvidia_gtc_dli_2025.iperf3_logs}
     reconfig_script_path: ${RECONFIG_SCRIPT_PATH:-../llm-slicing-5g-lab/docker/change_rc_slice_docker.sh}
 
+    # Profiling Configuration
+    profiling_enabled: ${PROFILING_ENABLED:-true}
+    profiling_output_dir: ${PROFILING_OUTPUT_DIR:-./profiles}
+    slow_warning_threshold_ms: ${SLOW_WARNING_THRESHOLD_MS:-5000}
+
+    # Guardrails Configuration
+    guardrails_enabled: ${GUARDRAILS_ENABLED:-true}
+    validation_mode: ${VALIDATION_MODE:-strict}
+
+    # Phoenix Observability Configuration
+    phoenix_enabled: ${PHOENIX_ENABLED:-true}
+    phoenix_endpoint: ${PHOENIX_ENDPOINT:-http://localhost:6006}
+    phoenix_project_name: ${PHOENIX_PROJECT_NAME:-5g-network-agent}
+    phoenix_service_name: ${PHOENIX_SERVICE_NAME:-nat-5g-agent}
+    phoenix_environment: ${PHOENIX_ENVIRONMENT:-production}
+
 # LLM Configuration
 llms:
   nvidia_nim:
