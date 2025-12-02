@@ -14,6 +14,7 @@ from typing import Callable, Any, Dict, List
 from datetime import datetime
 from pydantic import BaseModel, Field
 from pathlib import Path
+from typing import Optional
 
 
 class PerformanceMetrics(BaseModel):
