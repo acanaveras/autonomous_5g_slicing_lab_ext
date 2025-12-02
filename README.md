@@ -23,12 +23,24 @@ cp .env.example .env
 ./llm-slicing-5g-lab/docker/lab_start.sh
 ```
 
-### 4. Check Status
+### 4. Access the Services
+Once the lab is running, you can access the following services:
+
+| Port | Service              | Description                    |
+|------|----------------------|--------------------------------|
+| 9002 | Grafana             | Monitoring and visualization   |
+| 8501 | Streamlit           | Agent UI and dashboard         |
+| 9001 | InfluxDB            | Time-series database           |
+| 8080 | Kinetica Admin      | Kinetica admin console         |
+| 8000 | Kinetica Workbench  | Kinetica workbench interface   |
+
+
+### 5. Check Status
 ```bash
 ./llm-slicing-5g-lab/docker/lab_status.sh
 ```
 
-### 5. Stop the Lab
+### 6. Stop the Lab
 ```bash
 ./llm-slicing-5g-lab/docker/lab_stop.sh
 ```
