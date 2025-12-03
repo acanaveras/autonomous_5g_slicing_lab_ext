@@ -334,29 +334,130 @@ else
 fi
 echo ""
 
-# Step 13: Start UE (Slice 1)
-# Note: Running multiple UEs in Docker host mode with RF simulator causes conflicts
-# For production, use network namespaces or separate RF simulator instances
-log "Step 13: Starting UE (Slice 1)..."
-docker compose -f docker-compose-ue-host.yaml up -d oai-ue-slice1 2>&1 | tee -a "$LOG_FILE"
-wait_for_healthy "oai-ue-slice1" 60
-log_success "UE (Slice 1) is running"
+# Step 13: Create network namespace for UE1
+log "Step 13: Creating network namespace for UE1..."
+cd ..  # Go to project root where multi_ue.sh is located
+
+# Check if namespace already exists
+if sudo ip netns list | grep -q "ue1"; then
+    log_warning "Network namespace 'ue1' already exists, deleting and recreating..."
+    sudo ./multi_ue.sh -d 1 2>/dev/null || true
+    sleep 1
+fi
+
+if sudo ./multi_ue.sh -c1 >> "$LOG_FILE" 2>&1; then
+    log_success "Network namespace 'ue1' created"
+else
+    log_error "Failed to create network namespace 'ue1'"
+    cd docker
+    exit 1
+fi
 echo ""
 
-# Step 14: Verify UE connection
-log "Step 14: Verifying UE connection..."
-sleep 10
-if docker logs oai-ue-slice1 2>&1 | grep -q "REGISTRATION ACCEPT"; then
-    log_success "UE successfully registered with 5G Core"
+# Step 13b: Start UE1 in network namespace
+log "Starting UE1 in network namespace 'ue1'..."
+sudo ip netns exec ue1 bash -c \
+    "LD_LIBRARY_PATH=. ./openairinterface5g/cmake_targets/ran_build/build/nr-uesoftmodem \
+    --rfsimulator.serveraddr 10.201.1.100 \
+    -r 106 \
+    --numerology 1 \
+    --band 78 \
+    -C 3619200000 \
+    --rfsim \
+    --sa \
+    -O ran-conf/ue_1.conf \
+    -E" > "$LOG_DIR/UE1.log" 2>&1 &
 
-    # Check for IP address assignment
-    if docker logs oai-ue-slice1 2>&1 | grep -q "Interface oaitun_ue1 successfully configured"; then
-        ue_ip=$(docker logs oai-ue-slice1 2>&1 | grep "Interface oaitun_ue1 successfully configured" | tail -1 | grep -oP 'ip address \K[0-9.]+')
-        log_success "UE assigned IP address: $ue_ip"
+UE1_PID=$!
+log_success "UE1 started with PID $UE1_PID in namespace 'ue1'"
+sleep 10
+echo ""
+
+# Step 14: Create network namespace for UE3
+log "Step 14: Creating network namespace for UE3..."
+
+# Check if namespace already exists
+if sudo ip netns list | grep -q "ue3"; then
+    log_warning "Network namespace 'ue3' already exists, deleting and recreating..."
+    sudo ./multi_ue.sh -d 3 2>/dev/null || true
+    sleep 1
+fi
+
+if sudo ./multi_ue.sh -c3 >> "$LOG_FILE" 2>&1; then
+    log_success "Network namespace 'ue3' created"
+else
+    log_error "Failed to create network namespace 'ue3'"
+    cd docker
+    exit 1
+fi
+echo ""
+
+# Step 14b: Start UE3 in network namespace
+log "Starting UE3 in network namespace 'ue3'..."
+sudo ip netns exec ue3 bash -c \
+    "LD_LIBRARY_PATH=. ./openairinterface5g/cmake_targets/ran_build/build/nr-uesoftmodem \
+    --rfsimulator.serveraddr 10.203.1.100 \
+    -r 106 \
+    --numerology 1 \
+    --band 78 \
+    -C 3619200000 \
+    --rfsim \
+    --sa \
+    -O ran-conf/ue_2.conf \
+    -E" > "$LOG_DIR/UE2.log" 2>&1 &
+
+UE3_PID=$!
+log_success "UE3 started with PID $UE3_PID in namespace 'ue3'"
+sleep 10
+echo ""
+
+# Step 14c: Verify both UE connections
+log "Verifying UE registrations..."
+sleep 5
+
+UE1_REGISTERED=false
+UE3_REGISTERED=false
+
+# Check UE1 registration
+if grep -q "REGISTRATION ACCEPT" "$LOG_DIR/UE1.log" 2>/dev/null; then
+    log_success "UE1 successfully registered with 5G Core"
+    UE1_REGISTERED=true
+
+    # Check for IP assignment
+    if grep -q "Interface oaitun_ue1 successfully configured" "$LOG_DIR/UE1.log"; then
+        ue1_ip=$(grep "Interface oaitun_ue1 successfully configured" "$LOG_DIR/UE1.log" | tail -1 | grep -oP 'ip address \K[0-9.]+' || echo "12.1.1.2")
+        log_success "UE1 assigned IP address: $ue1_ip"
     fi
 else
-    log_warning "UE registration not confirmed, checking logs..."
+    log_warning "UE1 registration not confirmed yet, check $LOG_DIR/UE1.log"
 fi
+
+# Check UE3 registration
+if grep -q "REGISTRATION ACCEPT" "$LOG_DIR/UE2.log" 2>/dev/null; then
+    log_success "UE3 successfully registered with 5G Core"
+    UE3_REGISTERED=true
+
+    # Check for IP assignment
+    if grep -q "Interface oaitun_ue3 successfully configured" "$LOG_DIR/UE2.log"; then
+        ue3_ip=$(grep "Interface oaitun_ue3 successfully configured" "$LOG_DIR/UE2.log" | tail -1 | grep -oP 'ip address \K[0-9.]+' || echo "12.1.1.130")
+        log_success "UE3 assigned IP address: $ue3_ip"
+    fi
+else
+    log_warning "UE3 registration not confirmed yet, check $LOG_DIR/UE2.log"
+fi
+
+if [ "$UE1_REGISTERED" = true ] && [ "$UE3_REGISTERED" = true ]; then
+    log_success "Both UEs successfully registered!"
+elif [ "$UE1_REGISTERED" = true ] || [ "$UE3_REGISTERED" = true ]; then
+    log_warning "At least one UE registered, continuing..."
+else
+    log_error "Neither UE registered successfully"
+    log "Check logs at:"
+    log "  - $LOG_DIR/UE1.log"
+    log "  - $LOG_DIR/UE2.log"
+fi
+
+cd docker  # Return to docker directory
 echo ""
 
 # Step 15: Start Monitoring Stack (Optional)
@@ -403,14 +504,14 @@ else
 fi
 echo ""
 
-# Step 17: Start traffic generator
+# Step 17: Start traffic generator (FIXED VERSION with real iperf3 for both UEs)
 log "Step 17: Starting traffic generator..."
 cd ..
 TRAFFIC_LOG="$LOG_DIR/traffic_gen_final.log"
 AGENT_LOG="$LOG_DIR/agent.log"
 
 # Kill any existing traffic generator and log streaming
-pkill -f "generate_traffic.py" 2>/dev/null || true
+pkill -f "generate_traffic.*.py" 2>/dev/null || true
 pkill -f "tail -f.*traffic_gen_final.log" 2>/dev/null || true
 sleep 1
 
@@ -420,8 +521,21 @@ echo "=== Started: $(date) ===" >> "$AGENT_LOG"
 echo "" >> "$AGENT_LOG"
 chmod 666 "$AGENT_LOG" 2>/dev/null || true
 
-# Start traffic generator in background
-if python3 generate_traffic.py > "$TRAFFIC_LOG" 2>&1 &
+# Determine which traffic generator to use
+if [ -f "generate_traffic_fixed.py" ]; then
+    TRAFFIC_SCRIPT="generate_traffic_fixed.py"
+    log "Using FIXED traffic generator (real iperf3 for both UEs)"
+elif [ -f "generate_traffic.py" ]; then
+    TRAFFIC_SCRIPT="generate_traffic.py"
+    log_warning "Using OLD traffic generator (may have simulated UE3)"
+else
+    log_error "No traffic generator script found!"
+    cd docker
+    exit 1
+fi
+
+# Start traffic generator in background (needs sudo for network namespaces)
+if sudo python3 "$TRAFFIC_SCRIPT" > "$TRAFFIC_LOG" 2>&1 &
 then
     TRAFFIC_PID=$!
     sleep 3
@@ -429,11 +543,12 @@ then
     # Verify traffic generator is still running
     if kill -0 $TRAFFIC_PID 2>/dev/null; then
         log_success "Traffic generator started (PID: $TRAFFIC_PID)"
+        log "Traffic script: $TRAFFIC_SCRIPT"
         log "Traffic log: $TRAFFIC_LOG"
 
         # Wait a few seconds and check if traffic is being generated
         sleep 5
-        if tail -10 "$TRAFFIC_LOG" | grep -q "Starting iteration\|records inserted"; then
+        if tail -10 "$TRAFFIC_LOG" | grep -q "ITERATION\|Starting iperf3\|records inserted"; then
             log_success "Traffic generation confirmed - data flowing to InfluxDB/Kinetica"
 
             # Start log streaming to agent.log for Streamlit
@@ -442,12 +557,15 @@ then
             log_success "Log streaming to Streamlit started (PID: $LOG_STREAM_PID)"
         else
             log_warning "Traffic generator running but no data flow detected yet"
+            log "Check namespace verification in logs"
         fi
     else
         log_error "Traffic generator failed to start or crashed immediately"
+        log "Check $TRAFFIC_LOG for errors"
     fi
 else
     log_error "Failed to start traffic generator"
+    log "Make sure network namespaces exist: sudo ip netns list"
 fi
 cd docker
 echo ""
