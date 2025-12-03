@@ -254,12 +254,29 @@ then
             log_warning "Phoenix observability may not be enabled (check $NAT_LOG_FILE)"
         fi
 
-        # Wait a few seconds and check if server is responding
-        sleep 2
-        if curl -s http://localhost:4999/health > /dev/null 2>&1 || netstat -an | grep -q ":4999"; then
-            log_success "NAT server is responding"
-        else
-            log_warning "NAT server started but health check failed (may need time to initialize)"
+        # Wait for NAT server to be fully initialized
+        log "Waiting for NAT server to be ready (may take 30-60 seconds)..."
+        NAT_READY=false
+
+        for i in {1..30}; do
+            if curl -s http://localhost:4999/health > /dev/null 2>&1; then
+                log_success "NAT server is ready and responding"
+                NAT_READY=true
+                break
+            fi
+
+            # Show progress every 5 seconds
+            if [ $((i % 5)) -eq 0 ]; then
+                log "Still waiting for NAT... ($i/30 attempts)"
+            fi
+
+            sleep 2
+        done
+
+        if [ "$NAT_READY" = false ]; then
+            log_warning "NAT health check timed out after 60 seconds"
+            log "NAT may still be initializing. Check: curl http://localhost:4999/health"
+            log "Monitor logs: tail -f $NAT_LOG_FILE"
         fi
     else
         log_error "NAT server failed to start, check $NAT_LOG_FILE for errors"
