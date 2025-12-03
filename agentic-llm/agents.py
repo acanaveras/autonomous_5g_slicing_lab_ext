@@ -38,31 +38,25 @@ if PHOENIX_ENABLED:
         from openinference.instrumentation.langchain import LangChainInstrumentor
 
         # Register Phoenix tracer provider (global)
-        # MUST include /v1/traces path per Phoenix documentation (fixes 405 error)
+        # Let Phoenix auto-configure the endpoint to avoid 405 errors
         tracer_provider = phoenix_register(
-            project_name="5g-network-monitoring-agent",
-            endpoint="http://0.0.0.0:6006/v1/traces"
+            project_name="5g-network-monitoring-agent"
         )
 
-        # Suppress verbose/error logging from OpenInference instrumentation
-        # The instrumentor expects Message objects but State uses strings (messages: Optional[str])
-        # This causes "failed to parse messages of type <class 'str'>" errors
-        # These errors don't break functionality, just noisy logs
+        # Suppress verbose logging from OpenTelemetry before instrumentation
         import logging as stdlib_logging
-        stdlib_logging.getLogger('openinference').setLevel(stdlib_logging.CRITICAL)
-        stdlib_logging.getLogger('openinference.instrumentation.langchain').setLevel(stdlib_logging.CRITICAL)
-        stdlib_logging.getLogger('opentelemetry').setLevel(stdlib_logging.CRITICAL)
+        stdlib_logging.getLogger('openinference').setLevel(stdlib_logging.WARNING)
+        stdlib_logging.getLogger('opentelemetry').setLevel(stdlib_logging.WARNING)
 
         # Instrument LangChain
         instrumentor = LangChainInstrumentor()
         if not instrumentor.is_instrumented_by_opentelemetry:
             instrumentor.instrument(tracer_provider=tracer_provider)
 
-        print(f"✅ Phoenix tracing enabled")
-        print(f"   Endpoint: http://0.0.0.0:6006/v1/traces")
+        print(f"✅ Phoenix tracing enabled (auto-configured endpoint)")
         print(f"   Project: 5g-network-monitoring-agent")
         print(f"   Phoenix UI: http://0.0.0.0:6006")
-        print(f"   Note: Message parsing errors suppressed (State uses strings, not Message objects)\n")
+        print(f"   Note: Message parsing warnings are expected due to State using string messages\n")
     except Exception as e:
         print(f"⚠️  Phoenix tracing failed to initialize: {e}")
         print(f"   Continuing without Phoenix...\n")
