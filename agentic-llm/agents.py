@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # FIXED VERSION: Monitors packet loss metrics instead of log errors
+# DATA STALENESS FIX: ConfigurationAgent now uses time-based filtering and MonitoringAgent's detected UE
 
 import os
 import random
@@ -134,7 +135,15 @@ def MonitoringAgent(state: State):
                 for _, row in high_loss_ues.iterrows():
                     logging.info(f"   - {row['ue']}: {row['max_loss']:.2f}% loss (threshold: {PACKET_LOSS_THRESHOLD}%)")
 
+                # IMPROVED: Warn if multiple UEs have high loss
+                if len(high_loss_ues) > 1:
+                    logging.info(f"\n⚠️  WARNING: Multiple UEs ({len(high_loss_ues)}) have high packet loss!")
+                    logging.info(f"   Processing UE with highest loss first: {high_loss_ues.iloc[0]['ue']}\n")
+
                 logging.info(f"\n➡️  Triggering Configuration Agent for reconfiguration...\n")
+
+                # FIXED: Sort by max_loss to process worst UE first
+                high_loss_ues = high_loss_ues.sort_values('max_loss', ascending=False)
 
                 # Prepare data for Configuration Agent
                 trigger_data = {
@@ -172,22 +181,35 @@ def ConfigurationAgent(state: State):
     logging.info("="*80 + "\n")
     logging.info("Packet loss metrics detected: \n %s \n\n", state['files']['metrics'])
 
-    prompt_0 = '''
-    Your task is to determine which UE needs reconfiguration. Follow these steps exactly:
+    # FIXED: Use the UE already detected by MonitoringAgent instead of re-analyzing
+    detected_ue = state['files']['metrics']['ue']
+    detected_max_loss = state['files']['metrics']['max_loss']
 
-    1. Call the get_packetloss_logs tool to get detailed packet loss logs.
+    logging.info(f"🔍 Step 1: Using UE detected by MonitoringAgent...")
+    logging.info(f"   Detected UE: {detected_ue}")
+    logging.info(f"   Max packet loss: {detected_max_loss:.2f}%\n")
+
+    # Still call get_packetloss_logs for verification and logging purposes
+    prompt_0 = f'''
+    The Monitoring Agent has detected high packet loss for {detected_ue} ({detected_max_loss:.2f}%).
+
+    Call the get_packetloss_logs tool to verify and get recent packet loss data.
     Action: get_packetloss_logs()
 
-    2. Analyze the results:
-    - Identify which UE (UE1 or UE3) has a higher packet loss, depending on lost_packets,loss_percentage and UE.
-    - State which UE you've identified as needing reconfiguration.
-    If UE1 requires reconfiguration, just reply "UE1". If UE3 requires reconfiguration, just reply "UE3". DO NOT provide explanation.
+    After reviewing the logs, confirm that {detected_ue} is the UE that needs reconfiguration.
+    Reply with ONLY the UE name: either "UE1" or "UE3". DO NOT provide explanation.
     '''
-    logging.info("🔍 Step 1: Determining which UE needs reconfiguration...")
+
     human_message = HumanMessage(content=prompt_0)
     response = config_agent.invoke({"messages":[human_message]})
     cleaned_content0 = response['messages'][-1].content
-    logging.info(f"🎯 AI Decision: {cleaned_content0} requires reconfiguration\n")
+    logging.info(f"🎯 AI Confirmation: {cleaned_content0} requires reconfiguration\n")
+
+    # Validation: Ensure AI confirms the same UE detected by MonitoringAgent
+    if cleaned_content0.strip() != detected_ue:
+        logging.info(f"⚠️  WARNING: AI selected {cleaned_content0} but MonitoringAgent detected {detected_ue}")
+        logging.info(f"   Using MonitoringAgent's detection: {detected_ue} (more reliable)\n")
+        cleaned_content0 = detected_ue
 
     prompt_1 = f'''
 
