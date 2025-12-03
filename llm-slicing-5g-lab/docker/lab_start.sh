@@ -195,48 +195,19 @@ fi
 
 echo ""
 
-# Step 2a: Start Phoenix Server for Observability
-log "Step 2a: Starting Phoenix Server for observability..."
-
-# Check if Phoenix container is already running
-if docker ps --format '{{.Names}}' | grep -q "^phoenix$"; then
-    log_success "Phoenix container already running"
-else
-    # Kill any existing Phoenix container
-    docker rm -f phoenix 2>/dev/null || true
-
-    # Start Phoenix in Docker
-    log "Starting Phoenix server on port 6006..."
-    if docker run -d \
-        -p 6006:6006 \
-        -p 4317:4317 \
-        --name phoenix \
-        --restart unless-stopped \
-        arizephoenix/phoenix:latest >> "$LOG_FILE" 2>&1; then
-
-        log_success "Phoenix server started on http://0.0.0.0:6006"
-
-        # Wait for Phoenix to be ready
-        log "Waiting for Phoenix to be ready..."
-        for i in {1..30}; do
-            if curl -s http://0.0.0.0:6006/health > /dev/null 2>&1; then
-                log_success "Phoenix is ready"
-                break
-            fi
-            sleep 1
-        done
-    else
-        log_warning "Failed to start Phoenix server, continuing without it..."
-    fi
-fi
-echo ""
-
-# Step 2b: Start NAT Server
-log "Step 2b: Starting NAT Server..."
+# Step 2: Start NAT Server (Phoenix will launch automatically with NAT)
+log "Step 2: Starting NAT Server with Phoenix observability..."
 
 # Kill any existing NAT server process
 pkill -f "nat serve" 2>/dev/null || true
 sleep 1
+
+# Ensure port 4999 is free (kill any process using it)
+if lsof -ti:4999 > /dev/null 2>&1; then
+    log "Port 4999 in use, killing process..."
+    lsof -ti:4999 | xargs kill -9 2>/dev/null || true
+    sleep 2
+fi
 
 # Create logs directory for NAT server
 NAT_LOG_DIR="$ROOT_DIR/agentic-llm/nat_wrapper/logs"
@@ -251,10 +222,16 @@ chmod 755 "$NAT_PROFILES_DIR" 2>/dev/null || true
 NAT_CONFIG_FILE="$ROOT_DIR/agentic-llm/nat_wrapper/src/nat_5g_slicing/configs/config.yml"
 NAT_LOG_FILE="$NAT_LOG_DIR/nat_server.log"
 
-# Start NAT server in background
+# Enable Phoenix observability for NAT server
+export PHOENIX_ENABLED=true
+export PHOENIX_ENDPOINT=http://0.0.0.0:6006
+
+# Start NAT server in background with Phoenix enabled
 cd "$ROOT_DIR/agentic-llm/nat_wrapper"
 
-if nohup nat serve \
+log "Starting NAT server with Phoenix observability enabled..."
+
+if PHOENIX_ENABLED=true PHOENIX_ENDPOINT=http://0.0.0.0:6006 nohup nat serve \
     --config_file "$NAT_CONFIG_FILE" \
     --host 0.0.0.0 \
     --port 4999 > "$NAT_LOG_FILE" 2>&1 &
@@ -266,6 +243,16 @@ then
     if kill -0 $NAT_PID 2>/dev/null; then
         log_success "NAT server started on port 4999 (PID: $NAT_PID)"
         log "NAT server log: $NAT_LOG_FILE"
+
+        # Check for Phoenix initialization in logs
+        sleep 2
+        if grep -q "Phoenix observability enabled\|To view the Phoenix app" "$NAT_LOG_FILE" 2>/dev/null; then
+            log_success "Phoenix launched with NAT server"
+            log_success "Phoenix UI: http://localhost:6006"
+            log "Note: Phoenix is embedded with NAT and will stop when NAT stops"
+        else
+            log_warning "Phoenix observability may not be enabled (check $NAT_LOG_FILE)"
+        fi
 
         # Wait a few seconds and check if server is responding
         sleep 2
@@ -612,11 +599,16 @@ echo "  - iperf3 servers running on: oai-ext-dn (192.168.70.135:5201, 5202)"
 echo "  - Stop traffic: pkill -f generate_traffic.py"
 echo ""
 echo "NAT Server & Observability:"
-echo "  - NAT Server: http://localhost:4999 (NeMo Agent Toolkit)"
+echo "  - NAT Server API: http://localhost:4999 (NeMo Agent Toolkit)"
 echo "  - NAT Server logs: tail -f $ROOT_DIR/agentic-llm/nat_wrapper/logs/nat_server.log"
-echo "  - Phoenix UI: http://0.0.0.0:6006 (Observability & Tracing)"
-echo "  - Stop NAT server: pkill -f 'nat serve'"
-echo "  - Stop Phoenix: docker stop phoenix"
+echo "  - Phoenix UI: http://localhost:6006 (Observability & Tracing - embedded with NAT)"
+echo "  - Phoenix Status: Automatically launched with NAT server"
+echo ""
+echo "Management Commands:"
+echo "  - Stop NAT + Phoenix: pkill -f 'nat serve' (stops both NAT and Phoenix)"
+echo "  - Restart NAT + Phoenix: cd $ROOT_DIR/agentic-llm/nat_wrapper && PHOENIX_ENABLED=true nat serve --config_file src/nat_5g_slicing/configs/config.yml --port 4999"
+echo ""
+echo "Note: Phoenix is embedded with NAT. Stopping NAT will also stop Phoenix."
 echo ""
 echo "Monitoring & Visualization:"
 echo "  - Streamlit UI: http://localhost:8501 (click 'Start Monitoring' to view AI agent logs)"
