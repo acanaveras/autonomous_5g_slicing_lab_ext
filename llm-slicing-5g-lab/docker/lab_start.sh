@@ -195,100 +195,7 @@ fi
 
 echo ""
 
-# Step 2: Start NAT Server (Phoenix will launch automatically with NAT)
-log "Step 2: Starting NAT Server with Phoenix observability..."
-
-# Kill any existing NAT server process
-pkill -f "nat serve" 2>/dev/null || true
-sleep 1
-
-# Ensure port 4999 is free (kill any process using it)
-if lsof -ti:4999 > /dev/null 2>&1; then
-    log "Port 4999 in use, killing process..."
-    lsof -ti:4999 | xargs kill -9 2>/dev/null || true
-    sleep 2
-fi
-
-# Create logs directory for NAT server
-NAT_LOG_DIR="$ROOT_DIR/agentic-llm/nat_wrapper/logs"
-mkdir -p "$NAT_LOG_DIR"
-
-# Create profiles directory for NAT server
-NAT_PROFILES_DIR="$ROOT_DIR/agentic-llm/nat_wrapper/profiles"
-mkdir -p "$NAT_PROFILES_DIR"
-chmod 755 "$NAT_PROFILES_DIR" 2>/dev/null || true
-
-# Set NAT server configuration
-NAT_CONFIG_FILE="$ROOT_DIR/agentic-llm/nat_wrapper/src/nat_5g_slicing/configs/config.yml"
-NAT_LOG_FILE="$NAT_LOG_DIR/nat_server.log"
-
-# Enable Phoenix observability for NAT server
-export PHOENIX_ENABLED=true
-export PHOENIX_ENDPOINT=http://0.0.0.0:6006
-
-# Start NAT server in background with Phoenix enabled
-cd "$ROOT_DIR/agentic-llm/nat_wrapper"
-
-log "Starting NAT server with Phoenix observability enabled..."
-
-if PHOENIX_ENABLED=true PHOENIX_ENDPOINT=http://0.0.0.0:6006 nohup nat serve \
-    --config_file "$NAT_CONFIG_FILE" \
-    --host 0.0.0.0 \
-    --port 4999 > "$NAT_LOG_FILE" 2>&1 &
-then
-    NAT_PID=$!
-    sleep 3
-
-    # Verify NAT server is still running
-    if kill -0 $NAT_PID 2>/dev/null; then
-        log_success "NAT server started on port 4999 (PID: $NAT_PID)"
-        log "NAT server log: $NAT_LOG_FILE"
-
-        # Check for Phoenix initialization in logs
-        sleep 2
-        if grep -q "Phoenix observability enabled\|To view the Phoenix app" "$NAT_LOG_FILE" 2>/dev/null; then
-            log_success "Phoenix launched with NAT server"
-            log_success "Phoenix UI: http://localhost:6006"
-            log "Note: Phoenix is embedded with NAT and will stop when NAT stops"
-        else
-            log_warning "Phoenix observability may not be enabled (check $NAT_LOG_FILE)"
-        fi
-
-        # Wait for NAT server to be fully initialized
-        log "Waiting for NAT server to be ready (may take 30-60 seconds)..."
-        NAT_READY=false
-
-        for i in {1..30}; do
-            if curl -s http://localhost:4999/health > /dev/null 2>&1; then
-                log_success "NAT server is ready and responding"
-                NAT_READY=true
-                break
-            fi
-
-            # Show progress every 5 seconds
-            if [ $((i % 5)) -eq 0 ]; then
-                log "Still waiting for NAT... ($i/30 attempts)"
-            fi
-
-            sleep 2
-        done
-
-        if [ "$NAT_READY" = false ]; then
-            log_warning "NAT health check timed out after 60 seconds"
-            log "NAT may still be initializing. Check: curl http://localhost:4999/health"
-            log "Monitor logs: tail -f $NAT_LOG_FILE"
-        fi
-    else
-        log_error "NAT server failed to start, check $NAT_LOG_FILE for errors"
-    fi
-else
-    log_error "Failed to start NAT server"
-fi
-
-cd "$SCRIPT_DIR"
-echo ""
-
-# Step 3: Build RIC and OAI Network Elements (if not already built)
+# Step 2: Build RIC and OAI Network Elements (if not already built)
 log "Step 3: Building RIC and OAI Network Elements..."
 cd ..
 # Check if binaries actually exist, not just directories
@@ -599,6 +506,100 @@ if docker exec oai-ue-slice1 ping -I oaitun_ue1 -c 2 8.8.8.8 &>/dev/null; then
 else
     log_warning "UE connectivity test failed"
 fi
+echo ""
+
+# Step 20: Start NAT Server (after all infrastructure is ready)
+log "Step 20: Starting NAT Server with Phoenix observability..."
+log "Note: NAT requires full system initialization (5G network + Kinetica)"
+
+# Kill any existing NAT server process
+pkill -f "nat serve" 2>/dev/null || true
+sleep 1
+
+# Ensure port 4999 is free (kill any process using it)
+if lsof -ti:4999 > /dev/null 2>&1; then
+    log "Port 4999 in use, killing process..."
+    lsof -ti:4999 | xargs kill -9 2>/dev/null || true
+    sleep 2
+fi
+
+# Create logs directory for NAT server
+NAT_LOG_DIR="$ROOT_DIR/agentic-llm/nat_wrapper/logs"
+mkdir -p "$NAT_LOG_DIR"
+
+# Create profiles directory for NAT server
+NAT_PROFILES_DIR="$ROOT_DIR/agentic-llm/nat_wrapper/profiles"
+mkdir -p "$NAT_PROFILES_DIR"
+chmod 755 "$NAT_PROFILES_DIR" 2>/dev/null || true
+
+# Set NAT server configuration
+NAT_CONFIG_FILE="$ROOT_DIR/agentic-llm/nat_wrapper/src/nat_5g_slicing/configs/config.yml"
+NAT_LOG_FILE="$NAT_LOG_DIR/nat_server.log"
+
+# Enable Phoenix observability for NAT server
+export PHOENIX_ENABLED=true
+export PHOENIX_ENDPOINT=http://0.0.0.0:6006
+
+# Start NAT server in background with Phoenix enabled
+cd "$ROOT_DIR/agentic-llm/nat_wrapper"
+
+log "Starting NAT server with Phoenix observability enabled..."
+
+if PHOENIX_ENABLED=true PHOENIX_ENDPOINT=http://0.0.0.0:6006 nohup nat serve \
+    --config_file "$NAT_CONFIG_FILE" \
+    --host 0.0.0.0 \
+    --port 4999 > "$NAT_LOG_FILE" 2>&1 &
+then
+    NAT_PID=$!
+    sleep 3
+
+    # Verify NAT server is still running
+    if kill -0 $NAT_PID 2>/dev/null; then
+        log_success "NAT server started on port 4999 (PID: $NAT_PID)"
+        log "NAT server log: $NAT_LOG_FILE"
+
+        # Check for Phoenix initialization in logs
+        sleep 2
+        if grep -q "Phoenix observability enabled\|To view the Phoenix app" "$NAT_LOG_FILE" 2>/dev/null; then
+            log_success "Phoenix launched with NAT server"
+            log_success "Phoenix UI: http://localhost:6006"
+            log "Note: Phoenix is embedded with NAT and will stop when NAT stops"
+        else
+            log_warning "Phoenix observability may not be enabled (check $NAT_LOG_FILE)"
+        fi
+
+        # Wait for NAT server to be fully initialized
+        log "Waiting for NAT server to be ready (may take 30-60 seconds)..."
+        NAT_READY=false
+
+        for i in {1..30}; do
+            if curl -s http://localhost:4999/health > /dev/null 2>&1; then
+                log_success "NAT server is ready and responding"
+                NAT_READY=true
+                break
+            fi
+
+            # Show progress every 5 seconds
+            if [ $((i % 5)) -eq 0 ]; then
+                log "Still waiting for NAT... ($i/30 attempts)"
+            fi
+
+            sleep 2
+        done
+
+        if [ "$NAT_READY" = false ]; then
+            log_warning "NAT health check timed out after 60 seconds"
+            log "NAT may still be initializing. Check: curl http://localhost:4999/health"
+            log "Monitor logs: tail -f $NAT_LOG_FILE"
+        fi
+    else
+        log_error "NAT server failed to start, check $NAT_LOG_FILE for errors"
+    fi
+else
+    log_error "Failed to start NAT server"
+fi
+
+cd "$SCRIPT_DIR"
 echo ""
 
 echo "========================================"
