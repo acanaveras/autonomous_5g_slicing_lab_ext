@@ -44,7 +44,18 @@ if PHOENIX_ENABLED:
         )
 
         # Instrument LangChain
-        LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
+        instrumentor = LangChainInstrumentor()
+        if not instrumentor.is_instrumented_by_opentelemetry:
+            instrumentor.instrument(tracer_provider=tracer_provider)
+
+        # Suppress noisy instrumentation warnings
+        import warnings
+        warnings.filterwarnings('ignore', message='.*failed to parse messages.*')
+        warnings.filterwarnings('ignore', message='.*Failed to get attribute.*')
+
+        # Also suppress OTLP export errors in logging
+        import logging as stdlib_logging
+        stdlib_logging.getLogger('opentelemetry.exporter.otlp').setLevel(stdlib_logging.ERROR)
 
         print(f"✅ Phoenix tracing enabled: {os.getenv('PHOENIX_ENDPOINT', 'http://0.0.0.0:6006')}")
         print(f"   Project: 5g-network-monitoring-agent")
