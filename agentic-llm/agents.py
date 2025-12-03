@@ -29,8 +29,18 @@ config_file =  yaml.safe_load(open('config.yaml', 'r'))
 logging.basicConfig(
     filename= config_file['AGENT_LOG_FILE'],  # Log file name
     level=logging.INFO,   # Log level
-    format="%(message)s"  # Only log the message
+    format="%(message)s",  # Only log the message
+    force=True  # Override any existing logging config
 )
+
+# Get the root logger and disable buffering
+logger = logging.getLogger()
+for handler in logger.handlers:
+    handler.setLevel(logging.INFO)
+    handler.flush()
+    # Force immediate flush after each log by disabling buffering
+    if hasattr(handler, 'stream'):
+        handler.stream.reconfigure(line_buffering=True)
 
 #llm api to use Nvidia NIM Inference Endpoints.
 llm = ChatNVIDIA(

@@ -41,8 +41,18 @@ if not os.path.exists(config_file['AGENT_LOG_FILE']):
 logging.basicConfig(
     filename= config_file['AGENT_LOG_FILE'],  # Log file name
     level=logging.INFO,   # Log level
-    format="%(message)s"  # Only log the message
+    format="%(message)s",  # Only log the message
+    force=True  # Override any existing logging config
 )
+
+# Get the root logger and disable buffering
+logger = logging.getLogger()
+for handler in logger.handlers:
+    handler.setLevel(logging.INFO)
+    handler.flush()
+    # Force immediate flush after each log by disabling buffering
+    if hasattr(handler, 'stream'):
+        handler.stream.reconfigure(line_buffering=True)
 
 #format the output
 def pretty_print_message(update) -> str:
