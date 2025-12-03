@@ -24,6 +24,37 @@ load_dotenv(find_dotenv())
 
 print("___________________________________________starting agents (FIXED VERSION)")
 
+# Setup Phoenix tracing if enabled
+PHOENIX_ENABLED = os.getenv('PHOENIX_ENABLED', 'true').lower() == 'true'
+if PHOENIX_ENABLED:
+    try:
+        # Import Phoenix OTEL registration from nat_5g_slicing
+        import sys
+        nat_wrapper_path = os.path.join(os.path.dirname(__file__), 'nat_wrapper', 'src')
+        if nat_wrapper_path not in sys.path:
+            sys.path.insert(0, nat_wrapper_path)
+
+        from phoenix.otel import register as phoenix_register
+        from openinference.instrumentation.langchain import LangChainInstrumentor
+
+        # Register Phoenix tracer provider (global)
+        tracer_provider = phoenix_register(
+            project_name="5g-network-monitoring-agent",
+            endpoint=os.getenv('PHOENIX_ENDPOINT', 'http://0.0.0.0:6006'),
+        )
+
+        # Instrument LangChain
+        LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
+
+        print(f"✅ Phoenix tracing enabled: {os.getenv('PHOENIX_ENDPOINT', 'http://0.0.0.0:6006')}")
+        print(f"   Project: 5g-network-monitoring-agent")
+        print(f"   Visit http://0.0.0.0:6006 to view traces\n")
+    except Exception as e:
+        print(f"⚠️  Phoenix tracing failed to initialize: {e}")
+        print(f"   Continuing without Phoenix...\n")
+else:
+    print("ℹ️  Phoenix tracing disabled (set PHOENIX_ENABLED=true to enable)\n")
+
 # Configure the logger without timestamp and level tags
 config_file =  yaml.safe_load(open('config.yaml', 'r'))
 
