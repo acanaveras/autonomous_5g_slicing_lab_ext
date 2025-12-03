@@ -24,6 +24,7 @@ from nat.data_models.function import FunctionGroupBaseConfig
 try:
     import phoenix as px
     from phoenix.otel import register
+    from openinference.instrumentation.langchain import LangChainInstrumentor
 
     # Launch Phoenix UI server
     px.launch_app()
@@ -33,7 +34,12 @@ try:
         project_name="5g-network-agent",
         endpoint="http://0.0.0.0:6006",
     )
+
+    # Instrument LangChain to capture traces
+    LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
+
     PHOENIX_TRACING_AVAILABLE = True
+    logging.info("Phoenix tracing and LangChain instrumentation initialized successfully")
 except Exception as e:
     PHOENIX_TRACING_AVAILABLE = False
     tracer_provider = None
