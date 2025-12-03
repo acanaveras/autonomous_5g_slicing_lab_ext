@@ -38,28 +38,25 @@ if PHOENIX_ENABLED:
         from openinference.instrumentation.langchain import LangChainInstrumentor
 
         # Register Phoenix tracer provider (global)
+        # Let Phoenix auto-configure the endpoint to avoid 405 errors
         tracer_provider = phoenix_register(
-            project_name="5g-network-monitoring-agent",
-            endpoint=os.getenv('PHOENIX_ENDPOINT', 'http://0.0.0.0:6006'),
+            project_name="5g-network-monitoring-agent"
         )
+
+        # Suppress verbose logging from OpenTelemetry before instrumentation
+        import logging as stdlib_logging
+        stdlib_logging.getLogger('openinference').setLevel(stdlib_logging.WARNING)
+        stdlib_logging.getLogger('opentelemetry').setLevel(stdlib_logging.WARNING)
 
         # Instrument LangChain
         instrumentor = LangChainInstrumentor()
         if not instrumentor.is_instrumented_by_opentelemetry:
             instrumentor.instrument(tracer_provider=tracer_provider)
 
-        # Suppress noisy instrumentation warnings
-        import warnings
-        warnings.filterwarnings('ignore', message='.*failed to parse messages.*')
-        warnings.filterwarnings('ignore', message='.*Failed to get attribute.*')
-
-        # Also suppress OTLP export errors in logging
-        import logging as stdlib_logging
-        stdlib_logging.getLogger('opentelemetry.exporter.otlp').setLevel(stdlib_logging.ERROR)
-
-        print(f"✅ Phoenix tracing enabled: {os.getenv('PHOENIX_ENDPOINT', 'http://0.0.0.0:6006')}")
+        print(f"✅ Phoenix tracing enabled (auto-configured endpoint)")
         print(f"   Project: 5g-network-monitoring-agent")
-        print(f"   Visit http://0.0.0.0:6006 to view traces\n")
+        print(f"   Phoenix UI: http://0.0.0.0:6006")
+        print(f"   Note: Message parsing warnings are expected due to State using string messages\n")
     except Exception as e:
         print(f"⚠️  Phoenix tracing failed to initialize: {e}")
         print(f"   Continuing without Phoenix...\n")
