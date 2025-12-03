@@ -164,12 +164,10 @@ async def network_tools(
 
     load_dotenv(find_dotenv())
 
+    # Phoenix tracing is already initialized via phoenix.otel.register() at module level (line 25-29)
+    # The legacy setup_phoenix_tracing() call has been removed to fix 405 "Method Not Allowed" errors
     if config.phoenix_enabled and PHOENIX_TRACING_AVAILABLE:
-        try:
-            from nat_5g_slicing.phoenix_setup import setup_phoenix_tracing
-            setup_phoenix_tracing(config.phoenix_endpoint)
-        except Exception as e:
-            logging.warning(f"Failed to setup Phoenix tracing: {e}")
+        logging.info(f"Phoenix tracing already initialized via phoenix.otel.register()")
 
     # Initialize profiler if available
     profiler = None
