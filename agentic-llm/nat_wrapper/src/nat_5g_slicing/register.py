@@ -22,7 +22,13 @@ from nat.data_models.function import FunctionGroupBaseConfig
 
 # Try to import Phoenix tracing - make it optional
 try:
+    import phoenix as px
     from phoenix.otel import register
+
+    # Launch Phoenix UI server
+    px.launch_app()
+
+    # Register Phoenix tracing with modern OTEL approach
     tracer_provider = register(
         project_name="5g-network-agent",
         endpoint="http://0.0.0.0:6006",
