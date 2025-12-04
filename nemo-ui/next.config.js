@@ -26,8 +26,8 @@ const nextConfig = {
   },
   // Fix cross-origin HMR issues in cloud environments (Brev.dev, CodeSpaces, etc.)
   allowedDevOrigins: [
-    /\.brevlab\.com$/,
-    /\.github\.dev$/,
+    '*.brevlab.com',
+    '*.github.dev',
   ],
   // Fix webpack hot update 404 errors
   webpack: (config, { dev, isServer }) => {
