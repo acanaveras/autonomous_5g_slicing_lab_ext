@@ -36,14 +36,43 @@ const nextConfig = {
     '*.brevlab.com',
     '*.github.dev',
   ],
+  // Configure webpack dev middleware
+  ...(shouldDisableFastRefresh && {
+    webpackDevMiddleware: config => {
+      // Disable file watching in Docker
+      config.watchOptions = {
+        ignored: /.*/,
+        poll: false,
+      };
+      return config;
+    },
+  }),
   // Fix webpack hot update 404 errors and disable HMR if needed
-  webpack: (config, { dev, isServer }) => {
+  webpack: (config, { dev, isServer, webpack }) => {
     if (dev && !isServer) {
-      // Disable HMR if FAST_REFRESH is false
+      // Disable HMR completely if FAST_REFRESH is false
       if (shouldDisableFastRefresh) {
-        config.watchOptions = {
-          ignored: /.*/,
-        };
+        // Remove HotModuleReplacementPlugin
+        config.plugins = config.plugins.filter(
+          plugin => plugin.constructor.name !== 'HotModuleReplacementPlugin'
+        );
+        // Disable hot reloading in webpack config
+        if (config.entry && typeof config.entry === 'function') {
+          const originalEntry = config.entry;
+          config.entry = async () => {
+            const entries = await originalEntry();
+            Object.keys(entries).forEach(key => {
+              if (Array.isArray(entries[key])) {
+                entries[key] = entries[key].filter(
+                  entry => !entry.includes('webpack-hot-middleware') &&
+                           !entry.includes('webpack/hot/') &&
+                           !entry.includes('react-refresh')
+                );
+              }
+            });
+            return entries;
+          };
+        }
       } else {
         config.devServer = {
           ...config.devServer,
