@@ -320,9 +320,39 @@ server.keepAliveTimeout = 0;
 server.headersTimeout = 65_000;
 server.requestTimeout = 0;
 
+// --- Health Check for Next.js ---
+async function waitForNextJs(maxAttempts = 30, delayMs = 1000) {
+  const nextUrl = new URL(NEXT_DEV_TARGET);
+  const checkUrl = `${nextUrl.protocol}//${nextUrl.host}`;
+
+  console.log(`Waiting for Next.js to be ready at ${checkUrl}...`);
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await fetch(checkUrl, {
+        method: 'HEAD',
+        signal: AbortSignal.timeout(2000)
+      });
+      if (response.ok || response.status === 404) {
+        console.log(`✓ Next.js is ready (attempt ${attempt})`);
+        return true;
+      }
+    } catch (err) {
+      // Next.js not ready yet, continue waiting
+    }
+
+    if (attempt < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+
+  console.warn('⚠️  Next.js health check timed out, starting proxy anyway...');
+  return false;
+}
+
 // --- Start Server ---
 detectPort(GATEWAY_PORT)
-  .then((availablePort) => {
+  .then(async (availablePort) => {
     const port = availablePort;
     if (port !== GATEWAY_PORT) {
       console.warn(
@@ -331,6 +361,9 @@ detectPort(GATEWAY_PORT)
         port,
       );
     }
+
+    // Wait for Next.js to be ready before starting the proxy
+    await waitForNextJs();
 
     server.listen(port, () => {
       console.log(`\n Ready on http://localhost:${port}\n`);
