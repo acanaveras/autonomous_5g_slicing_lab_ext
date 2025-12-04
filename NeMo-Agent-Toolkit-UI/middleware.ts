@@ -3,6 +3,11 @@ import type { NextRequest } from 'next/server';
 import { SESSION_COOKIE_NAME, HTTP_PROXY_PATH } from './constants';
 
 export default function middleware(req: NextRequest) {
+  // Skip middleware for WebSocket upgrade requests
+  if (req.headers.get('upgrade') === 'websocket') {
+    return NextResponse.next();
+  }
+
   // Skip middleware for static files and auth routes
   if (
     req.nextUrl.pathname.startsWith('/_next/') ||
