@@ -1,5 +1,8 @@
 const { configureRuntimeEnv } = require('next-runtime-env/build/configure');
 
+// Check if Fast Refresh should be disabled
+const shouldDisableFastRefresh = process.env.FAST_REFRESH === 'false';
+
 const nextConfig = {
   env: {
     ...configureRuntimeEnv(),
@@ -23,21 +26,6 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: process.env.NAT_MAX_FILE_SIZE_STRING || '5mb',
     },
-  },
-  // Fix cross-origin HMR issues in cloud environments (Brev.dev, CodeSpaces, etc.)
-  allowedDevOrigins: [
-    '*.brevlab.com',
-    '*.github.dev',
-  ],
-  // Fix webpack hot update 404 errors
-  webpack: (config, { dev, isServer }) => {
-    if (dev && !isServer) {
-      config.devServer = {
-        ...config.devServer,
-        writeToDisk: true,
-      };
-    }
-    return config;
   },
   async redirects() {
     return [];
