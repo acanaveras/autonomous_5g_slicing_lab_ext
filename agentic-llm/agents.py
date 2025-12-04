@@ -216,9 +216,10 @@ system_promt = 'You are a Configuration agent in a LangGraph. Your task is to he
 config_agent = create_react_agent(llm, tools=[reconfigure_network, get_packetloss_logs], prompt = system_promt)
 
 def ConfigurationAgent(state: State):
-    response = "This is a Configuration Agent, whose goal is to reconfigure the network to solve packet loss issues."
+    # Use a separate variable name to avoid collision with agent invoke responses
+    agent_description = "This is a Configuration Agent, whose goal is to reconfigure the network to solve packet loss issues."
     logging.info("\n" + "="*80)
-    logging.info(response)
+    logging.info(agent_description)
     logging.info("="*80 + "\n")
     logging.info("Packet loss metrics detected: \n %s \n\n", state['files']['metrics'])
 
@@ -285,8 +286,9 @@ def ConfigurationAgent(state: State):
         consent = input("Do you want to continue Monitoring? (yes/no)")
 
     # FIXED: Return messages as a list of message objects (SystemMessage)
+    # Use agent_description (not response, which is now a dict from config_agent.invoke)
     return {
-        "messages": [SystemMessage(content=response)],
+        "messages": [SystemMessage(content=agent_description)],
         "agent_id": "Configuration Agent",
         "start": start,
         'config_value': config_value_updated,
