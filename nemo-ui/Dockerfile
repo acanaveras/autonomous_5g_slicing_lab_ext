@@ -44,6 +44,9 @@ EXPOSE 5001
 # Environment variables
 ENV NODE_ENV=development
 ENV NEXT_TELEMETRY_DISABLED=1
+# Disable Fast Refresh/HMR in Docker (doesn't work well in containers)
+ENV FAST_REFRESH=false
+ENV WATCHPACK_POLLING=true
 
 # Run the dev server (proxy + Next.js)
 CMD ["npm", "run", "dev"]
