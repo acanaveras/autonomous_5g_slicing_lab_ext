@@ -98,7 +98,12 @@ if check_port 5001; then
         # Check if .env exists
         if [ ! -f ".env" ]; then
             echo "Creating .env file..."
-            cp ../nemo-ui.env.template .env
+            cat > .env << 'EOF'
+NAT_BACKEND_URL=http://localhost:4999
+NEXT_PUBLIC_NAT_WEB_SOCKET_DEFAULT_ON=true
+NEXT_PUBLIC_NAT_ENABLE_INTERMEDIATE_STEPS=true
+PORT=5001
+EOF
         fi
 
         # Check if node_modules exists
@@ -115,7 +120,7 @@ if check_port 5001; then
         sleep 5
     else
         echo "❌ nemo-ui directory not found"
-        echo "   Run setup first: ./scripts/setup-nemo-ui.sh"
+        echo "   Run setup first: ./scripts/setup-nemo-ui-fixed.sh"
     fi
 else
     echo "✅ NeMo UI already running"
