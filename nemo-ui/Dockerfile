@@ -44,12 +44,10 @@ EXPOSE 5001
 # Environment variables
 ENV NODE_ENV=development
 ENV NEXT_TELEMETRY_DISABLED=1
-# Disable Fast Refresh/HMR in Docker (doesn't work well in containers)
-ENV FAST_REFRESH=false
-ENV WATCHPACK_POLLING=false
-# Disable webpack HMR and React Fast Refresh
-ENV WEBPACK_DISABLE_HOT=true
-ENV __NEXT_DISABLE_FAST_REFRESH=true
+# Enable polling for file watching in Docker (with reasonable interval)
+ENV CHOKIDAR_USEPOLLING=true
+ENV CHOKIDAR_INTERVAL=1000
+ENV WATCHPACK_POLLING=true
 
 # Run the dev server (proxy + Next.js)
 CMD ["npm", "run", "dev"]
