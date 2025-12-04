@@ -18,7 +18,7 @@ import os
 import time
 import yaml
 from typing import Literal
-from langchain_core.messages import convert_to_messages, BaseMessage, AIMessage
+from langchain_core.messages import convert_to_messages, BaseMessage, AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, MessagesState, END
 from langgraph.prebuilt import ToolNode
@@ -123,9 +123,9 @@ def main():
     config = RunnableConfig(recursion_limit=1500)
     start = os.path.getsize(file_path)
 
-    #input load to the agent
+    # FIXED: Input now uses proper message objects (HumanMessage) instead of string
     input = {
-        "messages": "Hey, can you monitor and reconfigure the network for me?",
+        "messages": [HumanMessage(content="Hey, can you monitor and reconfigure the network for me?")],
         "agent_id": "human",
         "files": None,
         "start": start,

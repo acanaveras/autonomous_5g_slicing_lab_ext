@@ -22,7 +22,7 @@ import gpudb
 # Load environment variables from .env file
 load_dotenv(find_dotenv())
 
-print("___________________________________________starting agents (FIXED VERSION)")
+print("___________________________________________starting agents (FIXED VERSION - MessagesState)")
 
 # Setup Phoenix tracing if enabled
 PHOENIX_ENABLED = os.getenv('PHOENIX_ENABLED', 'true').lower() == 'true'
@@ -56,7 +56,7 @@ if PHOENIX_ENABLED:
         print(f"✅ Phoenix tracing enabled (auto-configured endpoint)")
         print(f"   Project: 5g-network-monitoring-agent")
         print(f"   Phoenix UI: http://0.0.0.0:6006")
-        print(f"   Note: Message parsing warnings are expected due to State using string messages\n")
+        print(f"   Note: Now using proper MessagesState - tracing should work correctly\n")
     except Exception as e:
         print(f"⚠️  Phoenix tracing failed to initialize: {e}")
         print(f"   Continuing without Phoenix...\n")
@@ -105,14 +105,15 @@ kdbc: gpudb.GPUdb = gpudb.GPUdb(
     options=kdbc_options
 )
 
-#State class for communication between agents
-class State(TypedDict):
-    start:  Optional[int] = None #pointer to start reading from gnodeB.log
-    messages: Optional[str] = None
-    agent_id: Optional[str] = None #useful for routing between agents
-    files: Optional[dict] = None #pass error logs from Monitoring Agent to Configuration Agent
+# State class for communication between agents
+# FIXED: Now extends MessagesState to properly handle message objects
+class State(MessagesState):
+    """Extended MessagesState with additional fields for 5G network monitoring"""
+    start: Optional[int] = None  # pointer to start reading from gnodeB.log
+    agent_id: Optional[str] = None  # useful for routing between agents
+    files: Optional[dict] = None  # pass error logs from Monitoring Agent to Configuration Agent
     consent: Optional[str] = None
-    config_value: Optional[list] = None #keep a track of slice values
+    config_value: Optional[list] = None  # keep a track of slice values
     count: Optional[int] = None
 
 def MonitoringAgent(state: State):
@@ -192,8 +193,9 @@ def MonitoringAgent(state: State):
                     "samples": high_loss_ues.iloc[0]['samples']
                 }
 
+                # FIXED: Return messages as a list of message objects (SystemMessage)
                 return {
-                    "messages": response,
+                    "messages": [SystemMessage(content=response)],
                     "start": state.get('start', 0),
                     "files": {"metrics": trigger_data},
                     "config_value": state.get('config_value', ["50", "50"]),
@@ -281,4 +283,13 @@ def ConfigurationAgent(state: State):
     consent = 'yes'
     if count >= config_file['interrupt_after']:
         consent = input("Do you want to continue Monitoring? (yes/no)")
-    return {"messages":response, "agent_id": "Configuration Agent", "start": start, 'config_value':config_value_updated, 'count': count, 'consent': consent}
+
+    # FIXED: Return messages as a list of message objects (SystemMessage)
+    return {
+        "messages": [SystemMessage(content=response)],
+        "agent_id": "Configuration Agent",
+        "start": start,
+        'config_value': config_value_updated,
+        'count': count,
+        'consent': consent
+    }
