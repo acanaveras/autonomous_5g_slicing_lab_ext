@@ -6,6 +6,7 @@
     "dev": "next dev",
     "dev:gateway": "node proxy/server.js",
     "dev:next": "NEXT_TELEMETRY_DISABLED=1 next dev -p 3001",
+    "dev:all": "concurrently \"npm run dev:gateway\" \"npm run dev:next\"",
     "build": "next build",
     "start": "next start",
     "lint": "eslint . --ext .ts,.tsx",
