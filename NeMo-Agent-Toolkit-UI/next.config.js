@@ -24,6 +24,8 @@ const nextConfig = {
       bodySizeLimit: process.env.NAT_MAX_FILE_SIZE_STRING || '5mb',
     },
   },
+  // Allow all origins for cross-origin requests in development
+  allowedDevOrigins: ['*'],
   async redirects() {
     return [];
   },
