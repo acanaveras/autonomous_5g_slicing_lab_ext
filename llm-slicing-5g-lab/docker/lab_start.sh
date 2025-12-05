@@ -337,17 +337,13 @@ else
 fi
 echo ""
 
-# Step 13: Start UE (Slice 1)
-log "Step 13: Starting UE (Slice 1)..."
-docker compose -f docker-compose-ue-host.yaml up -d oai-ue-slice1 2>&1 | tee -a "$LOG_FILE"
+# Step 13: Start UEs (Slice 1 and Slice 2)
+# Note: Using bridge networking (docker-compose-ue.yaml) to avoid RF simulator conflicts
+# Host networking mode doesn't support multiple UEs properly
+log "Step 13: Starting UEs (Slice 1 and Slice 2) with bridge networking..."
+docker compose -f docker-compose-ue.yaml up -d oai-ue-slice1 oai-ue-slice2 2>&1 | tee -a "$LOG_FILE"
 wait_for_healthy "oai-ue-slice1" 60
 log_success "UE (Slice 1) is running"
-echo ""
-
-# Step 13b: Start UE (Slice 2)
-# Note: Uses node-number 4 to avoid RF simulator conflicts with Slice 1
-log "Step 13b: Starting UE (Slice 2)..."
-docker compose -f docker-compose-ue-host.yaml up -d oai-ue-slice2 2>&1 | tee -a "$LOG_FILE"
 wait_for_healthy "oai-ue-slice2" 60
 log_success "UE (Slice 2) is running"
 echo ""

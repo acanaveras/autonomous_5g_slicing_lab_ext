@@ -65,9 +65,9 @@ if docker ps | grep -q "oai-ue-slice2"; then
     exit 0
 fi
 
-# Start oai-ue-slice2
-log "Starting oai-ue-slice2 container..."
-docker compose -f docker-compose-ue-host.yaml up -d oai-ue-slice2
+# Start oai-ue-slice2 (using bridge networking to avoid conflicts)
+log "Starting oai-ue-slice2 container with bridge networking..."
+docker compose -f docker-compose-ue.yaml up -d oai-ue-slice2
 
 # Wait for it to be healthy
 if wait_for_healthy "oai-ue-slice2" 60; then
