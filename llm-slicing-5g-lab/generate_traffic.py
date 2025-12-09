@@ -7,11 +7,11 @@ from typing import Pattern
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-def get_ue_ip(namespace: str = "ue1", interface: str = "oaitun_ue1") -> str:
-    """Auto-detect UE IP address from the namespace"""
+def get_ue_ip(container_name: str = "oai-ue-slice1") -> str:
+    """Auto-detect UE IP address from the container"""
     try:
         result = subprocess.run(
-            ["sudo", "ip", "netns", "exec", namespace, "ip", "addr", "show", interface],
+            ["docker", "exec", container_name, "ip", "addr", "show", "oaitun_ue1"],
             capture_output=True,
             text=True,
             timeout=5
@@ -19,23 +19,31 @@ def get_ue_ip(namespace: str = "ue1", interface: str = "oaitun_ue1") -> str:
         if result.returncode == 0:
             # Parse IP address from output like: "inet 12.1.1.3/24 brd ..."
             for line in result.stdout.split('\n'):
-                if 'inet ' in line and '/' in line:
+                if 'inet ' in line and '/24' in line:
                     ip = line.strip().split()[1].split('/')[0]
-                    logger.info(f"✅ Auto-detected {namespace} IP: {ip}")
+                    logger.info(f"✅ Auto-detected UE IP: {ip}")
                     return ip
     except Exception as e:
-        logger.error(f"Failed to auto-detect IP for {namespace}: {e}")
+        logger.error(f"Failed to auto-detect UE IP: {e}")
 
-    # Fallback to known IPs from notebook
-    # UE1 in namespace ue1: 12.1.1.2
-    # UE2 in namespace ue3: 12.1.1.130
-    fallback_ips = {
-        "ue1": "12.1.1.2",
-        "ue3": "12.1.1.130"
-    }
-    fallback = fallback_ips.get(namespace, "12.1.1.2")
-    logger.warning(f"Using fallback IP for {namespace}: {fallback}")
-    return fallback
+    # Fallback to common IPs
+    logger.warning("Could not auto-detect UE IP, trying common addresses...")
+    for ip in ["12.1.1.2", "12.1.1.3", "12.1.1.4"]:
+        try:
+            # Test ping to see if interface responds
+            result = subprocess.run(
+                ["docker", "exec", container_name, "ping", "-I", ip, "-c", "1", "-W", "1", "192.168.70.135"],
+                capture_output=True,
+                timeout=3
+            )
+            if result.returncode == 0:
+                logger.info(f"✅ Found working UE IP: {ip}")
+                return ip
+        except:
+            continue
+
+    logger.error("❌ Could not determine UE IP address!")
+    return "12.1.1.2"  # Last resort fallback
 
 # Configure Kinetica (optional - will continue without it)
 try:
@@ -132,19 +140,21 @@ def write_to_influxdb(ue_name: str, record: dict):
     except Exception as e:
         pass  # Silent fail for InfluxDB
 
-def iperf_runner_single(namespace, ue_name, bind_host, server_host, udp_port, bandwidth, test_length_secs, log_file):
-    """Run a single iperf test in a network namespace (not continuous)"""
+def iperf_runner_single(ue_container, ue_name, bind_host, server_host, udp_port, bandwidth, test_length_secs, log_file):
+    """Run a single iperf test (not continuous)"""
     try:
-        # Build iperf command to run in namespace
-        iperf_cmd = f"iperf3 -B {bind_host} -c {server_host} -p {udp_port} -R -u -b {bandwidth} -t {test_length_secs} --forceflush"
-        
-        # Full command with namespace execution
-        cmd = ["sudo", "ip", "netns", "exec", namespace, "bash", "-c", iperf_cmd]
+        # CRITICAL FIX: Use unbuffered Python + immediate flush
+        iperf_cmd = [
+            "docker", "exec", ue_container,
+            "iperf3", "-B", bind_host, "-c", server_host,
+            "-p", str(udp_port), "-R", "-u", "-b", bandwidth,
+            "-t", str(test_length_secs), "--forceflush"  # Force immediate output
+        ]
 
-        logger.info(f"🚀 [{ue_name}] Starting iperf test in namespace {namespace} ({bandwidth}, {test_length_secs}s)")
+        logger.info(f"🚀 [{ue_name}] Starting iperf test ({bandwidth}, {test_length_secs}s)")
 
         proc = subprocess.Popen(
-            cmd,
+            iperf_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
@@ -199,62 +209,53 @@ def iperf_runner_single(namespace, ue_name, bind_host, server_host, udp_port, ba
     except Exception as e:
         logger.error(f"❌ Error in {ue_name}: {e}")
 
-def get_ue_ip_with_retry(namespace: str, interface: str = "oaitun_ue1", max_retries: int = 10) -> str:
-    """Auto-detect UE IP address in namespace with retry logic"""
+# Helper function to get UE IP with retry
+def get_ue_ip_with_retry(container_name: str, interface: str, max_retries: int = 5) -> str:
+    """Auto-detect UE IP address with retry logic"""
     for attempt in range(max_retries):
         try:
             result = subprocess.run(
-                ["sudo", "ip", "netns", "exec", namespace, "ip", "addr", "show", interface],
+                ["docker", "exec", container_name, "ip", "addr", "show", interface],
                 capture_output=True,
                 text=True,
                 timeout=5
             )
             if result.returncode == 0:
                 for line in result.stdout.split('\n'):
-                    if 'inet ' in line and '/' in line:
+                    if 'inet ' in line and '/24' in line:
                         ip = line.strip().split()[1].split('/')[0]
-                        logger.info(f"✅ Auto-detected {namespace} IP: {ip}")
+                        logger.info(f"✅ Auto-detected {container_name} IP: {ip}")
                         return ip
         except Exception as e:
-            logger.warning(f"Attempt {attempt + 1}/{max_retries} failed for {namespace}: {e}")
-        time.sleep(2)
+            logger.warning(f"Attempt {attempt + 1}/{max_retries} failed for {container_name}: {e}")
+            time.sleep(2)
 
-    # Fallback to known IPs from notebook
-    fallback_ips = {
-        "ue1": "12.1.1.2",
-        "ue3": "12.1.1.130"
-    }
-    fallback = fallback_ips.get(namespace)
-    if fallback:
-        logger.warning(f"Using fallback IP for {namespace}: {fallback}")
-        return fallback
-    
-    logger.error(f"❌ Could not determine IP for {namespace}")
+    logger.error(f"❌ Could not determine IP for {container_name}")
     return None
 
 # Start traffic generation with bandwidth alternation for both UE1 and UE2
 logger.info("="*60)
-logger.info("🚀 CONTINUOUS TRAFFIC GENERATION (UE1 + UE2 - NAMESPACE MODE)")
+logger.info("🚀 CONTINUOUS TRAFFIC GENERATION (UE1 + UE2 - REAL TRAFFIC)")
 logger.info("="*60)
 
-# Auto-detect UE1 IP address (namespace ue1)
-ue1_ip = get_ue_ip_with_retry("ue1", "oaitun_ue1")
+# Auto-detect UE1 IP address
+ue1_ip = get_ue_ip_with_retry("oai-ue-slice1", "oaitun_ue1")
 
 if not ue1_ip:
     logger.error("❌ Failed to detect UE1 IP address. Exiting...")
     exit(1)
 
-# Auto-detect UE2 IP address (namespace ue3 - like notebook)
-ue2_ip = get_ue_ip_with_retry("ue3", "oaitun_ue1")
+# Auto-detect UE2 IP address
+ue2_ip = get_ue_ip_with_retry("oai-ue-slice2", "oaitun_ue2")
 
 if not ue2_ip:
     logger.error("❌ Failed to detect UE2 IP address. Exiting...")
     exit(1)
 
-logger.info(f"Using UE1 IP: {ue1_ip} (namespace ue1)")
-logger.info(f"Using UE2 IP: {ue2_ip} (namespace ue3)")
+logger.info(f"Using UE1 IP: {ue1_ip}")
+logger.info(f"Using UE2 IP: {ue2_ip}")
 logger.info("")
-logger.info("📝 Both UE1 and UE2 will run REAL iperf3 traffic via namespaces")
+logger.info("📝 Both UE1 and UE2 will run REAL iperf3 traffic")
 logger.info("   - UE1: Real iperf traffic to port 5201 with alternating bandwidth")
 logger.info("   - UE2: Real iperf traffic to port 5202 with inverse bandwidth pattern")
 logger.info("   - This demonstrates real slicing behavior in Grafana dashboard")
@@ -422,17 +423,17 @@ try:
         iteration += 1
         logger.info(f"📡 Iteration {iteration}: UE1={bandwidth_ue1}, UE2={bandwidth_ue2}")
 
-        # Run UE1 and UE2 traffic in parallel using threads (namespace mode)
+        # Run UE1 and UE2 traffic in parallel using threads
         ue1_thread = threading.Thread(
             target=iperf_runner_single,
-            args=("ue1", "UE1", ue1_ip, "192.168.70.135", 5201,
+            args=("oai-ue-slice1", "UE1", ue1_ip, "192.168.70.135", 5201,
                   bandwidth_ue1, test_length_secs,
                   os.path.join(os.getcwd(), "logs", "UE1_iperfc.log"))
         )
 
         ue2_thread = threading.Thread(
             target=iperf_runner_single,
-            args=("ue3", "UE2", ue2_ip, "192.168.70.135", 5202,
+            args=("oai-ue-slice2", "UE2", ue2_ip, "192.168.70.135", 5202,
                   bandwidth_ue2, test_length_secs,
                   os.path.join(os.getcwd(), "logs", "UE2_iperfc.log"))
         )

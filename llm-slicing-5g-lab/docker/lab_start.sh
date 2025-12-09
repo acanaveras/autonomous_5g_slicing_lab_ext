@@ -334,78 +334,29 @@ else
 fi
 echo ""
 
-# Step 13: Start UEs using network namespaces
-# Note: Docker host mode causes TUN interface conflicts for multiple UEs
-# Using Linux network namespaces provides proper isolation
-log "Step 13: Starting UEs using network namespaces..."
-cd ..
-
-# Make script executable
-chmod +x start_ues_namespace.sh
-
-# Start UEs in background (they will run in namespaces ue1 and ue3)
-log "Creating namespaces and starting UE processes..."
-
-# Create namespace for UE1
-log "Creating namespace ue1..."
-sudo ./multi_ue.sh -c1 &
-sleep 3
-
-# Start UE1 in namespace
-log "Starting UE1 (Slice 1) in namespace ue1..."
-(
-    export LD_LIBRARY_PATH="."
-    sudo ip netns exec ue1 bash -c "
-        cd $PWD
-        export LD_LIBRARY_PATH=.
-        ./openairinterface5g/cmake_targets/ran_build/build/nr-uesoftmodem \
-            --rfsimulator.serveraddr 10.201.1.100 \
-            -r 106 --numerology 1 --band 78 -C 3619200000 \
-            --rfsim --sa -O ran-conf/ue_1.conf -E \
-            --log_config.global_log_level info \
-            2>&1 | tee logs/UE1.log
-    " &
-)
-sleep 10
-
-# Create namespace for UE2 (using ue3 like notebook)
-log "Creating namespace ue3..."
-sudo ./multi_ue.sh -c3 &
-sleep 3
-
-# Start UE2 in namespace ue3
-log "Starting UE2 (Slice 2) in namespace ue3..."
-(
-    export LD_LIBRARY_PATH="."
-    sudo ip netns exec ue3 bash -c "
-        cd $PWD
-        export LD_LIBRARY_PATH=.
-        ./openairinterface5g/cmake_targets/ran_build/build/nr-uesoftmodem \
-            --rfsimulator.serveraddr 10.203.1.100 \
-            -r 106 --numerology 1 --band 78 -C 3619200000 \
-            --rfsim --sa -O ran-conf/ue_2.conf -E \
-            --log_config.global_log_level info \
-            2>&1 | tee logs/UE3.log
-    " &
-)
-
-cd docker
-log_success "UE processes started in namespaces (ue1 and ue3)"
+# Step 13: Start UE (Slice 1)
+# Note: Running multiple UEs in Docker host mode with RF simulator causes conflicts
+# For production, use network namespaces or separate RF simulator instances
+log "Step 13: Starting UE (Slice 1)..."
+docker compose -f docker-compose-ue-host.yaml up -d oai-ue-slice1 2>&1 | tee -a "$LOG_FILE"
+wait_for_healthy "oai-ue-slice1" 60
+log_success "UE (Slice 1) is running"
 echo ""
 
-# Step 14: Wait for UE registration
-log "Step 14: Waiting for UE registration (30 seconds)..."
-sleep 30
+# Step 14: Verify UE connection
+log "Step 14: Verifying UE connection..."
+sleep 10
+if docker logs oai-ue-slice1 2>&1 | grep -q "REGISTRATION ACCEPT"; then
+    log_success "UE successfully registered with 5G Core"
 
-# Verify UE interfaces in namespaces
-for ns in ue1 ue3; do
-    if sudo ip netns exec $ns ip addr show oaitun_ue1 2>/dev/null | grep -q "inet "; then
-        ue_ip=$(sudo ip netns exec $ns ip addr show oaitun_ue1 | grep "inet " | awk '{print $2}' | cut -d'/' -f1)
-        log_success "UE in namespace $ns assigned IP: $ue_ip"
-    else
-        log_warning "UE in namespace $ns: oaitun_ue1 not yet configured"
+    # Check for IP address assignment
+    if docker logs oai-ue-slice1 2>&1 | grep -q "Interface oaitun_ue1 successfully configured"; then
+        ue_ip=$(docker logs oai-ue-slice1 2>&1 | grep "Interface oaitun_ue1 successfully configured" | tail -1 | grep -oP 'ip address \K[0-9.]+')
+        log_success "UE assigned IP address: $ue_ip"
     fi
-done
+else
+    log_warning "UE registration not confirmed, checking logs..."
+fi
 echo ""
 
 # Step 15: Start Monitoring Stack (Optional)
@@ -548,17 +499,12 @@ echo "Running Containers:"
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "NAME|oai-|flexric|influx|grafana|kinetica|streamlit"
 echo ""
 
-# Step 19: Quick connectivity test (using namespaces)
+# Step 19: Quick connectivity test
 log "Step 19: Testing UE connectivity..."
-if sudo ip netns exec ue1 ping -c 2 192.168.70.135 &>/dev/null; then
-    log_success "UE1 has connectivity to external data network!"
+if docker exec oai-ue-slice1 ping -I oaitun_ue1 -c 2 8.8.8.8 &>/dev/null; then
+    log_success "UE has internet connectivity!"
 else
-    log_warning "UE1 connectivity test failed"
-fi
-if sudo ip netns exec ue3 ping -c 2 192.168.70.135 &>/dev/null; then
-    log_success "UE2 has connectivity to external data network!"
-else
-    log_warning "UE2 connectivity test failed"
+    log_warning "UE connectivity test failed"
 fi
 echo ""
 
