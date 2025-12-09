@@ -434,6 +434,7 @@ sudo ip netns exec ue2 bash -c "\
     --sa \
     -O $UE2_CONF \
     -E \
+    --node-number 2 \
     --log_config.global_log_level info" > "$UE2_LOG" 2>&1 &
 
 UE2_PID=$!
