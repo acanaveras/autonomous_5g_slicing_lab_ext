@@ -143,9 +143,10 @@ def write_to_influxdb(ue_name: str, record: dict):
 def iperf_runner_single(ue_namespace, ue_name, bind_host, server_host, udp_port, bandwidth, test_length_secs, log_file):
     """Run a single iperf test (not continuous) - UPDATED FOR NAMESPACES"""
     try:
-        # Run iperf3 in namespace instead of Docker container (use full path)
+        # Run iperf3 in namespace instead of Docker container (use full path with LD_LIBRARY_PATH)
         iperf_cmd = [
             "sudo", "ip", "netns", "exec", ue_namespace,
+            "env", "LD_LIBRARY_PATH=/usr/lib:/lib",
             "/usr/bin/iperf3", "-B", bind_host, "-c", server_host,
             "-p", str(udp_port), "-R", "-u", "-b", bandwidth,
             "-t", str(test_length_secs), "--forceflush"  # Force immediate output
