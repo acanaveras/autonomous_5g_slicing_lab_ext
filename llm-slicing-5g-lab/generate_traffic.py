@@ -233,9 +233,9 @@ def get_ue_ip_with_retry(container_name: str, interface: str, max_retries: int =
     logger.error(f"❌ Could not determine IP for {container_name}")
     return None
 
-# Start traffic generation with bandwidth alternation and UE2 simulation
+# Start traffic generation with bandwidth alternation for both UE1 and UE2
 logger.info("="*60)
-logger.info("🚀 CONTINUOUS TRAFFIC GENERATION (UE1 + Simulated UE2)")
+logger.info("🚀 CONTINUOUS TRAFFIC GENERATION (UE1 + UE2 - REAL TRAFFIC)")
 logger.info("="*60)
 
 # Auto-detect UE1 IP address
@@ -245,17 +245,25 @@ if not ue1_ip:
     logger.error("❌ Failed to detect UE1 IP address. Exiting...")
     exit(1)
 
+# Auto-detect UE2 IP address
+ue2_ip = get_ue_ip_with_retry("oai-ue-slice2", "oaitun_ue2")
+
+if not ue2_ip:
+    logger.error("❌ Failed to detect UE2 IP address. Exiting...")
+    exit(1)
+
 logger.info(f"Using UE1 IP: {ue1_ip}")
+logger.info(f"Using UE2 IP: {ue2_ip}")
 logger.info("")
-logger.info("📝 Note: UE2 is simulated (Docker RF simulator limitation)")
-logger.info("   - UE1: Real iperf traffic with alternating bandwidth")
-logger.info("   - UE2: Simulated metrics with inverse bandwidth pattern")
-logger.info("   - This demonstrates slicing behavior in Grafana dashboard")
+logger.info("📝 Both UE1 and UE2 will run REAL iperf3 traffic")
+logger.info("   - UE1: Real iperf traffic to port 5201 with alternating bandwidth")
+logger.info("   - UE2: Real iperf traffic to port 5202 with inverse bandwidth pattern")
+logger.info("   - This demonstrates real slicing behavior in Grafana dashboard")
 logger.info("")
 
 # Initial bandwidth settings (opposite patterns for UE1 and UE2)
 bandwidth_ue1 = "30M"
-bandwidth_ue2_simulated = "120M"  # Inverse of UE1
+bandwidth_ue2 = "120M"  # Inverse of UE1
 test_length_secs = 60  # Each iteration runs for 60 seconds
 iteration = 0
 
@@ -263,9 +271,6 @@ logger.info("🔄 Starting bandwidth alternation pattern:")
 logger.info("   - UE1 and UE2 will alternate between 30M and 120M")
 logger.info("   - Pattern shows effect of dynamic bandwidth slicing")
 logger.info("")
-
-# Track UE1 metrics for UE2 simulation
-ue1_last_metrics = []
 
 def simulate_ue2_metrics(ue1_record, target_bandwidth, ue1_bandwidth):
     """Create realistic UE2 metrics based on UE1 pattern but different bandwidth"""
@@ -416,23 +421,40 @@ def iperf_runner_with_ue2_sim(ue_container, ue_name, bind_host, server_host, udp
 try:
     while True:
         iteration += 1
-        logger.info(f"📡 Iteration {iteration}: UE1={bandwidth_ue1}, UE2={bandwidth_ue2_simulated} (simulated)")
+        logger.info(f"📡 Iteration {iteration}: UE1={bandwidth_ue1}, UE2={bandwidth_ue2}")
 
-        # Run UE1 traffic with UE2 simulation
-        iperf_runner_with_ue2_sim(
-            "oai-ue-slice1", "UE1", ue1_ip, "192.168.70.135", 5201,
-            bandwidth_ue1, test_length_secs,
-            os.path.join(os.getcwd(), "logs", "UE1_iperfc.log"),
-            bandwidth_ue2_simulated
+        # Run UE1 and UE2 traffic in parallel using threads
+        ue1_thread = threading.Thread(
+            target=iperf_runner_single,
+            args=("oai-ue-slice1", "UE1", ue1_ip, "192.168.70.135", 5201,
+                  bandwidth_ue1, test_length_secs,
+                  os.path.join(os.getcwd(), "logs", "UE1_iperfc.log"))
         )
+
+        ue2_thread = threading.Thread(
+            target=iperf_runner_single,
+            args=("oai-ue-slice2", "UE2", ue2_ip, "192.168.70.135", 5202,
+                  bandwidth_ue2, test_length_secs,
+                  os.path.join(os.getcwd(), "logs", "UE2_iperfc.log"))
+        )
+
+        # Start both threads
+        ue1_thread.start()
+        ue2_thread.start()
+
+        # Wait for both to complete
+        ue1_thread.join()
+        ue2_thread.join()
+
+        logger.info(f"✅ Iteration {iteration} completed for both UE1 and UE2")
 
         # Alternate bandwidths for next iteration (inverse pattern)
         if bandwidth_ue1 == "30M":
             bandwidth_ue1 = "120M"
-            bandwidth_ue2_simulated = "30M"
+            bandwidth_ue2 = "30M"
         else:
             bandwidth_ue1 = "30M"
-            bandwidth_ue2_simulated = "120M"
+            bandwidth_ue2 = "120M"
 
         # Small pause between iterations
         time.sleep(2)
