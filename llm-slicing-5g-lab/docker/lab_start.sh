@@ -352,7 +352,6 @@ sudo ./multi_ue.sh -c1 &
 sleep 3
 
 # Start UE1 in namespace
-# Note: gNB runs in Docker at 192.168.70.151, not natively like notebook
 log "Starting UE1 (Slice 1) in namespace ue1..."
 (
     export LD_LIBRARY_PATH="."
@@ -360,7 +359,7 @@ log "Starting UE1 (Slice 1) in namespace ue1..."
         cd $PWD
         export LD_LIBRARY_PATH=.
         ./openairinterface5g/cmake_targets/ran_build/build/nr-uesoftmodem \
-            --rfsimulator.serveraddr 192.168.70.151 \
+            --rfsimulator.serveraddr 10.201.1.100 \
             -r 106 --numerology 1 --band 78 -C 3619200000 \
             --rfsim --sa -O ran-conf/ue_1.conf -E \
             --log_config.global_log_level info \
@@ -382,7 +381,7 @@ log "Starting UE2 (Slice 2) in namespace ue3..."
         cd $PWD
         export LD_LIBRARY_PATH=.
         ./openairinterface5g/cmake_targets/ran_build/build/nr-uesoftmodem \
-            --rfsimulator.serveraddr 192.168.70.151 \
+            --rfsimulator.serveraddr 10.203.1.100 \
             -r 106 --numerology 1 --band 78 -C 3619200000 \
             --rfsim --sa -O ran-conf/ue_2.conf -E \
             --log_config.global_log_level info \

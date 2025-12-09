@@ -156,10 +156,10 @@ cleanup
 # Remove trap temporarily during startup
 trap - EXIT
 
-# Start UE1 (Slice 1) - connects to Docker gNB at 192.168.70.151
+# Start UE1 (Slice 1)
 log ""
 log "Starting UE1 (Slice 1)..."
-start_ue 1 "ran-conf/ue_1.conf" "192.168.70.151"
+start_ue 1 "ran-conf/ue_1.conf" "10.201.1.100"
 
 # Wait for UE1 to initialize before starting UE2
 log "Waiting 10 seconds for UE1 to initialize..."
@@ -168,7 +168,7 @@ sleep 10
 # Start UE2 (Slice 2) - uses namespace ue3 like in the notebook
 log ""
 log "Starting UE2 (Slice 2) in namespace ue3..."
-start_ue 3 "ran-conf/ue_2.conf" "192.168.70.151"
+start_ue 3 "ran-conf/ue_2.conf" "10.203.1.100"
 
 # Restore cleanup trap
 trap cleanup EXIT
