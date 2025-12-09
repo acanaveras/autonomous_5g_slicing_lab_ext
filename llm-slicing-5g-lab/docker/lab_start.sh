@@ -434,7 +434,6 @@ sudo ip netns exec ue2 bash -c "\
     --sa \
     -O $UE2_CONF \
     -E \
-    --node-number 2 \
     --log_config.global_log_level info" > "$UE2_LOG" 2>&1 &
 
 UE2_PID=$!
@@ -467,9 +466,9 @@ fi
 # Verify UE2 registration
 if grep -q "REGISTRATION ACCEPT" "$UE2_LOG" 2>/dev/null; then
     log_success "UE2 successfully registered with 5G Core"
-    # Try to extract IP address
-    if grep -q "Interface oaitun_ue2 successfully configured" "$UE2_LOG" 2>/dev/null; then
-        ue2_ip=$(grep "Interface oaitun_ue2 successfully configured" "$UE2_LOG" | tail -1 | grep -oP 'ip address \K[0-9.]+' || echo "unknown")
+    # Try to extract IP address (UE2 creates oaitun_ue1 in its namespace, not oaitun_ue2)
+    if grep -q "Interface oaitun_ue1 successfully configured" "$UE2_LOG" 2>/dev/null; then
+        ue2_ip=$(grep "Interface oaitun_ue1 successfully configured" "$UE2_LOG" | tail -1 | grep -oP 'ip address \K[0-9.]+' || echo "unknown")
         log_success "UE2 assigned IP address: $ue2_ip"
     fi
 else
@@ -628,8 +627,8 @@ else
     log_warning "UE1 connectivity test failed"
 fi
 
-# Test UE2 connectivity from namespace
-if sudo ip netns exec ue2 ping -I oaitun_ue2 -c 2 192.168.70.135 &>/dev/null; then
+# Test UE2 connectivity from namespace (UE2 uses oaitun_ue1 in its namespace)
+if sudo ip netns exec ue2 ping -I oaitun_ue1 -c 2 192.168.70.135 &>/dev/null; then
     log_success "UE2 has connectivity to external DN!"
 else
     log_warning "UE2 connectivity test failed"

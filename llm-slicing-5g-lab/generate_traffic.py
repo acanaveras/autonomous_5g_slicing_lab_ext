@@ -246,7 +246,8 @@ if not ue1_ip:
     exit(1)
 
 # Auto-detect UE2 IP address from namespace ue2
-ue2_ip = get_ue_ip_with_retry("ue2", "oaitun_ue2")
+# Note: UE2 also creates oaitun_ue1 (not ue2) because it's in a separate namespace
+ue2_ip = get_ue_ip_with_retry("ue2", "oaitun_ue1")
 
 if not ue2_ip:
     logger.error("❌ Failed to detect UE2 IP address from namespace ue2. Exiting...")
