@@ -343,6 +343,10 @@ cd ..
 # Make script executable
 chmod +x start_ues_namespace.sh
 
+# Enable IP forwarding on host (required for routing between namespaces and Docker)
+log "Enabling IP forwarding..."
+sudo sysctl -w net.ipv4.ip_forward=1 > /dev/null
+
 # Start UEs in background (they will run in namespaces ue1 and ue3)
 log "Creating namespaces and starting UE processes..."
 
@@ -351,8 +355,17 @@ log "Creating namespace ue1..."
 sudo ./multi_ue.sh -c1 &
 sleep 3
 
+# Setup routing from namespace ue1 to Docker network (192.168.70.0/24)
+log "Setting up routing for namespace ue1 to Docker network..."
+# Add route in namespace to reach Docker network via host
+sudo ip netns exec ue1 ip route add 192.168.70.0/24 via 10.201.1.100 2>/dev/null || true
+# Add NAT for traffic from namespace to Docker network
+sudo iptables -t nat -A POSTROUTING -s 10.201.1.0/24 -d 192.168.70.0/24 -j MASQUERADE 2>/dev/null || true
+# Allow forwarding between veth and Docker bridge
+sudo iptables -A FORWARD -i v-eth1 -o demo-oai -j ACCEPT 2>/dev/null || true
+sudo iptables -A FORWARD -i demo-oai -o v-eth1 -j ACCEPT 2>/dev/null || true
+
 # Start UE1 in namespace
-# Note: gNB runs in Docker at 192.168.70.151, not natively like notebook
 log "Starting UE1 (Slice 1) in namespace ue1..."
 (
     export LD_LIBRARY_PATH="."
@@ -373,6 +386,13 @@ sleep 10
 log "Creating namespace ue3..."
 sudo ./multi_ue.sh -c3 &
 sleep 3
+
+# Setup routing from namespace ue3 to Docker network
+log "Setting up routing for namespace ue3 to Docker network..."
+sudo ip netns exec ue3 ip route add 192.168.70.0/24 via 10.203.1.100 2>/dev/null || true
+sudo iptables -t nat -A POSTROUTING -s 10.203.1.0/24 -d 192.168.70.0/24 -j MASQUERADE 2>/dev/null || true
+sudo iptables -A FORWARD -i v-eth3 -o demo-oai -j ACCEPT 2>/dev/null || true
+sudo iptables -A FORWARD -i demo-oai -o v-eth3 -j ACCEPT 2>/dev/null || true
 
 # Start UE2 in namespace ue3
 log "Starting UE2 (Slice 2) in namespace ue3..."
