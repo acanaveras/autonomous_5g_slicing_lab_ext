@@ -233,9 +233,9 @@ def get_ue_ip_with_retry(container_name: str, interface: str, max_retries: int =
     logger.error(f"❌ Could not determine IP for {container_name}")
     return None
 
-# Start traffic generation with bandwidth alternation and UE3 simulation
+# Start traffic generation with bandwidth alternation and UE2 simulation
 logger.info("="*60)
-logger.info("🚀 CONTINUOUS TRAFFIC GENERATION (UE1 + Simulated UE3)")
+logger.info("🚀 CONTINUOUS TRAFFIC GENERATION (UE1 + Simulated UE2)")
 logger.info("="*60)
 
 # Auto-detect UE1 IP address
@@ -247,39 +247,39 @@ if not ue1_ip:
 
 logger.info(f"Using UE1 IP: {ue1_ip}")
 logger.info("")
-logger.info("📝 Note: UE3 is simulated (Docker RF simulator limitation)")
+logger.info("📝 Note: UE2 is simulated (Docker RF simulator limitation)")
 logger.info("   - UE1: Real iperf traffic with alternating bandwidth")
-logger.info("   - UE3: Simulated metrics with inverse bandwidth pattern")
+logger.info("   - UE2: Simulated metrics with inverse bandwidth pattern")
 logger.info("   - This demonstrates slicing behavior in Grafana dashboard")
 logger.info("")
 
-# Initial bandwidth settings (opposite patterns for UE1 and UE3)
+# Initial bandwidth settings (opposite patterns for UE1 and UE2)
 bandwidth_ue1 = "30M"
-bandwidth_ue3_simulated = "120M"  # Inverse of UE1
+bandwidth_ue2_simulated = "120M"  # Inverse of UE1
 test_length_secs = 60  # Each iteration runs for 60 seconds
 iteration = 0
 
 logger.info("🔄 Starting bandwidth alternation pattern:")
-logger.info("   - UE1 and UE3 will alternate between 30M and 120M")
+logger.info("   - UE1 and UE2 will alternate between 30M and 120M")
 logger.info("   - Pattern shows effect of dynamic bandwidth slicing")
 logger.info("")
 
-# Track UE1 metrics for UE3 simulation
+# Track UE1 metrics for UE2 simulation
 ue1_last_metrics = []
 
-def simulate_ue3_metrics(ue1_record, target_bandwidth, ue1_bandwidth):
-    """Create realistic UE3 metrics based on UE1 pattern but different bandwidth"""
+def simulate_ue2_metrics(ue1_record, target_bandwidth, ue1_bandwidth):
+    """Create realistic UE2 metrics based on UE1 pattern but different bandwidth"""
     # Calculate bandwidth ratio
     ue1_bw = 30 if ue1_bandwidth == "30M" else 120
-    ue3_bw = 30 if target_bandwidth == "30M" else 120
-    ratio = ue3_bw / ue1_bw
+    ue2_bw = 30 if target_bandwidth == "30M" else 120
+    ratio = ue2_bw / ue1_bw
 
     # Simulate packet loss based on bandwidth demand and slice allocation
     # Assume 50/50 slice allocation initially (each slice gets ~60M of 120M total)
     # When requesting 120M with 50% allocation, expect ~0.5-2% loss
     # When requesting 30M with 50% allocation, minimal loss ~0-0.3%
     base_loss_ue1 = 0.0
-    base_loss_ue3 = 0.0
+    base_loss_ue2 = 0.0
 
     if ue1_bw == 120:  # UE1 high bandwidth
         # Requesting 120M but slice limited to ~60M → congestion
@@ -288,20 +288,20 @@ def simulate_ue3_metrics(ue1_record, target_bandwidth, ue1_bandwidth):
         # Requesting 30M, well within 60M limit → minimal loss
         base_loss_ue1 = random.uniform(0.0, 0.3)
 
-    if ue3_bw == 120:  # UE3 high bandwidth
+    if ue2_bw == 120:  # UE2 high bandwidth
         # Requesting 120M but slice limited to ~60M → congestion
-        base_loss_ue3 = random.uniform(0.8, 2.5)  # Slightly different than UE1
-    else:  # UE3 low bandwidth
+        base_loss_ue2 = random.uniform(0.8, 2.5)  # Slightly different than UE1
+    else:  # UE2 low bandwidth
         # Requesting 30M, well within 60M limit → minimal loss
-        base_loss_ue3 = random.uniform(0.0, 0.4)
+        base_loss_ue2 = random.uniform(0.0, 0.4)
 
     # Calculate total packets based on bandwidth and duration
     total_packets = int(ue1_record["total_packets"] * ratio * random.uniform(0.95, 1.05))
-    lost_packets = int(total_packets * (base_loss_ue3 / 100.0))
+    lost_packets = int(total_packets * (base_loss_ue2 / 100.0))
 
-    # Create UE3 record with scaled metrics and realistic variations
-    ue3_record = {
-        "ue": "UE3",
+    # Create UE2 record with scaled metrics and realistic variations
+    ue2_record = {
+        "ue": "UE2",
         "stream": ue1_record["stream"],
         "interval_start": ue1_record["interval_start"],
         "interval_end": ue1_record["interval_end"],
@@ -310,9 +310,9 @@ def simulate_ue3_metrics(ue1_record, target_bandwidth, ue1_bandwidth):
         "bitrate": ue1_record["bitrate"] * ratio * random.uniform(0.95, 1.05),
         "data_transferred": ue1_record["data_transferred"] * ratio * random.uniform(0.95, 1.05),
         # Jitter varies independently (higher at high bandwidth)
-        "jitter": ue1_record["jitter"] * random.uniform(0.8, 1.5) + (2.0 if ue3_bw == 120 else 0.5),
+        "jitter": ue1_record["jitter"] * random.uniform(0.8, 1.5) + (2.0 if ue2_bw == 120 else 0.5),
         # Realistic packet loss based on bandwidth demand vs allocation
-        "loss_percentage": base_loss_ue3,
+        "loss_percentage": base_loss_ue2,
         "lost_packets": lost_packets,
         "total_packets": total_packets,
     }
@@ -320,10 +320,10 @@ def simulate_ue3_metrics(ue1_record, target_bandwidth, ue1_bandwidth):
     # Using real iperf3 packet loss for UE1 (not simulated)
     # Real values are already captured from iperf3 output parsing
 
-    return ue3_record
+    return ue2_record
 
-def iperf_runner_with_ue3_sim(ue_container, ue_name, bind_host, server_host, udp_port, bandwidth, test_length_secs, log_file, ue3_bandwidth):
-    """Run iperf for UE1 and simulate UE3 metrics"""
+def iperf_runner_with_ue2_sim(ue_container, ue_name, bind_host, server_host, udp_port, bandwidth, test_length_secs, log_file, ue2_bandwidth):
+    """Run iperf for UE1 and simulate UE2 metrics"""
     global ue1_last_metrics
     try:
         iperf_cmd = [
@@ -334,7 +334,7 @@ def iperf_runner_with_ue3_sim(ue_container, ue_name, bind_host, server_host, udp
         ]
 
         logger.info(f"🚀 [UE1] Starting iperf test ({bandwidth}, {test_length_secs}s)")
-        logger.info(f"🎭 [UE3] Simulating with bandwidth {ue3_bandwidth}")
+        logger.info(f"🎭 [UE2] Simulating with bandwidth {ue2_bandwidth}")
 
         proc = subprocess.Popen(
             iperf_cmd,
@@ -345,7 +345,7 @@ def iperf_runner_with_ue3_sim(ue_container, ue_name, bind_host, server_host, udp
         )
 
         records_inserted = 0
-        ue3_records_inserted = 0
+        ue2_records_inserted = 0
 
         for line in proc.stdout:
             line = line.strip()
@@ -377,38 +377,38 @@ def iperf_runner_with_ue3_sim(ue_container, ue_name, bind_host, server_host, udp
                         if records_inserted == 0:
                             logger.error(f"❌ [UE1] Kinetica insert failed: {e}")
 
-                # Generate UE3 simulated metrics (this also adds loss to UE1)
-                ue3_record = simulate_ue3_metrics(ue1_record, ue3_bandwidth, bandwidth)
+                # Generate UE2 simulated metrics (this also adds loss to UE1)
+                ue2_record = simulate_ue2_metrics(ue1_record, ue2_bandwidth, bandwidth)
 
                 # Write UE1 to InfluxDB (now with added packet loss)
                 write_to_influxdb(ue_name, ue1_record)
 
-                # Write UE3 to InfluxDB
-                write_to_influxdb("UE3", ue3_record)
+                # Write UE2 to InfluxDB
+                write_to_influxdb("UE2", ue2_record)
 
-                # Insert UE3 into Kinetica
+                # Insert UE2 into Kinetica
                 if kdbc is not None:
                     try:
                         sql = f"""INSERT INTO {FIXED_TABLE_NAME} ("ue", "stream", "interval_start", "interval_end", "data_transferred", "bitrate", "jitter", "lost_packets", "total_packets", "loss_percentage", "duration")
-                                  VALUES ('{ue3_record["ue"]}', {ue3_record["stream"]}, {ue3_record["interval_start"]}, {ue3_record["interval_end"]}, {ue3_record["data_transferred"]}, {ue3_record["bitrate"]}, {ue3_record["jitter"]}, {ue3_record["lost_packets"]}, {ue3_record["total_packets"]}, {ue3_record["loss_percentage"]}, {ue3_record["duration"]})"""
+                                  VALUES ('{ue2_record["ue"]}', {ue2_record["stream"]}, {ue2_record["interval_start"]}, {ue2_record["interval_end"]}, {ue2_record["data_transferred"]}, {ue2_record["bitrate"]}, {ue2_record["jitter"]}, {ue2_record["lost_packets"]}, {ue2_record["total_packets"]}, {ue2_record["loss_percentage"]}, {ue2_record["duration"]})"""
                         kdbc.execute_sql(sql)
-                        ue3_records_inserted += 1
+                        ue2_records_inserted += 1
                     except Exception as e:
-                        if ue3_records_inserted == 0:
-                            logger.error(f"❌ [UE3] Kinetica insert failed: {e}")
+                        if ue2_records_inserted == 0:
+                            logger.error(f"❌ [UE2] Kinetica insert failed: {e}")
 
                 # Write to UE1 log file
                 with open(log_file, "a") as f:
                     f.write(f"[{ue_name}] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {line}\n")
 
-                # Write to UE3 log file
-                ue3_log = os.path.join(os.getcwd(), "logs", "UE3_iperfc.log")
-                with open(ue3_log, "a") as f:
-                    f.write(f"[UE3] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] SIMULATED - Bitrate: {ue3_record['bitrate']:.2f} Mbits/sec, Loss: {ue3_record['loss_percentage']:.2f}%\n")
+                # Write to UE2 log file
+                ue2_log = os.path.join(os.getcwd(), "logs", "UE2_iperfc.log")
+                with open(ue2_log, "a") as f:
+                    f.write(f"[UE2] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] SIMULATED - Bitrate: {ue2_record['bitrate']:.2f} Mbits/sec, Loss: {ue2_record['loss_percentage']:.2f}%\n")
 
         proc.wait()
         logger.info(f"✅ [UE1] Test completed - {records_inserted} records inserted")
-        logger.info(f"✅ [UE3] Simulation completed - {ue3_records_inserted} records inserted")
+        logger.info(f"✅ [UE2] Simulation completed - {ue2_records_inserted} records inserted")
 
     except Exception as e:
         logger.error(f"❌ Error in {ue_name}: {e}")
@@ -416,23 +416,23 @@ def iperf_runner_with_ue3_sim(ue_container, ue_name, bind_host, server_host, udp
 try:
     while True:
         iteration += 1
-        logger.info(f"📡 Iteration {iteration}: UE1={bandwidth_ue1}, UE3={bandwidth_ue3_simulated} (simulated)")
+        logger.info(f"📡 Iteration {iteration}: UE1={bandwidth_ue1}, UE2={bandwidth_ue2_simulated} (simulated)")
 
-        # Run UE1 traffic with UE3 simulation
-        iperf_runner_with_ue3_sim(
+        # Run UE1 traffic with UE2 simulation
+        iperf_runner_with_ue2_sim(
             "oai-ue-slice1", "UE1", ue1_ip, "192.168.70.135", 5201,
             bandwidth_ue1, test_length_secs,
             os.path.join(os.getcwd(), "logs", "UE1_iperfc.log"),
-            bandwidth_ue3_simulated
+            bandwidth_ue2_simulated
         )
 
         # Alternate bandwidths for next iteration (inverse pattern)
         if bandwidth_ue1 == "30M":
             bandwidth_ue1 = "120M"
-            bandwidth_ue3_simulated = "30M"
+            bandwidth_ue2_simulated = "30M"
         else:
             bandwidth_ue1 = "30M"
-            bandwidth_ue3_simulated = "120M"
+            bandwidth_ue2_simulated = "120M"
 
         # Small pause between iterations
         time.sleep(2)

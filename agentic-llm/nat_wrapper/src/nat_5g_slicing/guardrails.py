@@ -226,8 +226,8 @@ class InputValidator:
         issues = []
 
         # Validate UE identifier
-        if ue.upper() not in ["UE1", "UE3"]:
-            issues.append(f"Invalid UE: {ue}. Must be 'UE1' or 'UE3'")
+        if ue.upper() not in ["UE1", "UE2"]:
+            issues.append(f"Invalid UE: {ue}. Must be 'UE1' or 'UE2'")
 
         # Validate bandwidth values are in range
         if not (0 <= value_1_old <= 100):

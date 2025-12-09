@@ -81,7 +81,7 @@ curl -X POST http://localhost:4999/generate \
 
 **Look for in logs:**
 ```
-[GUARDRAIL] Invalid input: Invalid UE: UE2. Must be 'UE1' or 'UE3'
+[GUARDRAIL] Invalid input: Invalid UE: UE3. Must be 'UE1' or 'UE2'
 ERROR: Validation failed
 ```
 
@@ -302,8 +302,8 @@ export GUARDRAILS_ENABLED=false
 
 ```
 1. Request received
-2. [EXECUTING] reconfigure_network with UE=UE2, value_1_old=50, value_2_old=50
-3. [GUARDRAIL] Invalid input: Invalid UE: UE2. Must be 'UE1' or 'UE3'
+2. [EXECUTING] reconfigure_network with UE=UE3, value_1_old=50, value_2_old=50
+3. [GUARDRAIL] Invalid input: Invalid UE: UE3. Must be 'UE1' or 'UE2'
 4. ERROR: Validation failed
 5. Error response sent
 ```

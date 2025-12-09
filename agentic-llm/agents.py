@@ -239,7 +239,7 @@ def ConfigurationAgent(state: State):
     Action: get_packetloss_logs()
 
     After reviewing the logs, confirm that {detected_ue} is the UE that needs reconfiguration.
-    Reply with ONLY the UE name: either "UE1" or "UE3". DO NOT provide explanation.
+    Reply with ONLY the UE name: either "UE1" or "UE2". DO NOT provide explanation.
     '''
 
     human_message = HumanMessage(content=prompt_0)
@@ -256,7 +256,7 @@ def ConfigurationAgent(state: State):
     prompt_1 = f'''
 
     Your task is to reconfigure the network using the `reconfigure_network` tool. The tool accepts the following parameters:
-    1. `UE` = UE (UE1 or UE3) which requires reconfiguration
+    1. `UE` = UE (UE1 or UE2) which requires reconfiguration
     2. `value_1_old` = Old value 1 of configs
     3. `value_2_old` = Old value 2 of configs
 
