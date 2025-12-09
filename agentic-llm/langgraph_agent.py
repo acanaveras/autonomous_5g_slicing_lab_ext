@@ -18,7 +18,7 @@ import os
 import time
 import yaml
 from typing import Literal
-from langchain_core.messages import convert_to_messages, BaseMessage, AIMessage
+from langchain_core.messages import convert_to_messages, BaseMessage, AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, MessagesState, END
 from langgraph.prebuilt import ToolNode
@@ -41,8 +41,18 @@ if not os.path.exists(config_file['AGENT_LOG_FILE']):
 logging.basicConfig(
     filename= config_file['AGENT_LOG_FILE'],  # Log file name
     level=logging.INFO,   # Log level
-    format="%(message)s"  # Only log the message
+    format="%(message)s",  # Only log the message
+    force=True  # Override any existing logging config
 )
+
+# Get the root logger and disable buffering
+logger = logging.getLogger()
+for handler in logger.handlers:
+    handler.setLevel(logging.INFO)
+    handler.flush()
+    # Force immediate flush after each log by disabling buffering
+    if hasattr(handler, 'stream'):
+        handler.stream.reconfigure(line_buffering=True)
 
 #format the output
 def pretty_print_message(update) -> str:
@@ -113,9 +123,9 @@ def main():
     config = RunnableConfig(recursion_limit=1500)
     start = os.path.getsize(file_path)
 
-    #input load to the agent
+    # FIXED: Input now uses proper message objects (HumanMessage) instead of string
     input = {
-        "messages": "Hey, can you monitor and reconfigure the network for me?",
+        "messages": [HumanMessage(content="Hey, can you monitor and reconfigure the network for me?")],
         "agent_id": "human",
         "files": None,
         "start": start,

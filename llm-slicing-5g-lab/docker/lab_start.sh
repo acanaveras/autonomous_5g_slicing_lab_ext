@@ -125,9 +125,77 @@ if [ -f "$ROOT_DIR/requirements.txt" ]; then
 else
     log_warning "requirements.txt not found in parent directory"
 fi
+
+# --- NAT Wrapper Installation ---
+log "Installing NAT (NeMo Agent Toolkit) wrapper..."
+
+# Install uv if not present (faster package installer)
+if ! command -v uv &>/dev/null; then
+    log "Installing uv package manager..."
+    pip3 install uv 2>&1 | tee -a "$LOG_FILE"
+    if [ $? -eq 0 ]; then
+        log_success "uv installed"
+    else
+        log_warning "Failed to install uv, falling back to pip"
+    fi
+fi
+
+# Install NVIDIA NAT with LangChain support
+log "Installing nvidia-nat[langchain]..."
+if command -v uv &>/dev/null; then
+    uv pip install nvidia-nat[langchain] 2>&1 | tee -a "$LOG_FILE"
+else
+    pip3 install nvidia-nat[langchain] 2>&1 | tee -a "$LOG_FILE"
+fi
+
+if [ $? -eq 0 ]; then
+    log_success "nvidia-nat[langchain] installed"
+else
+    log_warning "Failed to install nvidia-nat[langchain]"
+fi
+
+# Install NAT wrapper in editable mode
+NAT_WRAPPER_DIR="$ROOT_DIR/agentic-llm/nat_wrapper"
+if [ -d "$NAT_WRAPPER_DIR" ]; then
+    log "Installing nat_5g_slicing wrapper in editable mode..."
+    cd "$NAT_WRAPPER_DIR"
+    
+    # Install Phoenix observability dependencies first
+    log "Installing Phoenix observability dependencies..."
+    if command -v uv &>/dev/null; then
+        # Install specific versions to avoid compatibility issues
+        uv pip install "arize-phoenix>=4.0.0" "arize-phoenix-otel>=0.1.0" "openinference-instrumentation-langchain>=0.1.0" 2>&1 | tee -a "$LOG_FILE"
+    else
+        pip3 install "arize-phoenix>=4.0.0" "arize-phoenix-otel>=0.1.0" "openinference-instrumentation-langchain>=0.1.0" 2>&1 | tee -a "$LOG_FILE"
+    fi
+    
+    if [ $? -eq 0 ]; then
+        log_success "Phoenix dependencies installed"
+    else
+        log_warning "Failed to install Phoenix dependencies"
+    fi
+    
+    # Install NAT wrapper
+    if command -v uv &>/dev/null; then
+        uv pip install -e . 2>&1 | tee -a "$LOG_FILE"
+    else
+        pip3 install -e . 2>&1 | tee -a "$LOG_FILE"
+    fi
+    
+    if [ $? -eq 0 ]; then
+        log_success "nat_5g_slicing wrapper installed"
+    else
+        log_warning "Failed to install nat_5g_slicing wrapper"
+    fi
+    cd "$SCRIPT_DIR"
+else
+    log_warning "NAT wrapper directory not found at $NAT_WRAPPER_DIR, skipping..."
+fi
+# --- END NAT Wrapper Installation ---
+
 echo ""
 
-# Step 3: Build RIC and OAI Network Elements (if not already built)
+# Step 2: Build RIC and OAI Network Elements (if not already built)
 log "Step 3: Building RIC and OAI Network Elements..."
 cd ..
 # Check if binaries actually exist, not just directories
@@ -440,6 +508,100 @@ else
 fi
 echo ""
 
+# Step 20: Start NAT Server (after all infrastructure is ready)
+log "Step 20: Starting NAT Server with Phoenix observability..."
+log "Note: NAT requires full system initialization (5G network + Kinetica)"
+
+# Kill any existing NAT server process
+pkill -f "nat serve" 2>/dev/null || true
+sleep 1
+
+# Ensure port 4999 is free (kill any process using it)
+if lsof -ti:4999 > /dev/null 2>&1; then
+    log "Port 4999 in use, killing process..."
+    lsof -ti:4999 | xargs kill -9 2>/dev/null || true
+    sleep 2
+fi
+
+# Create logs directory for NAT server
+NAT_LOG_DIR="$ROOT_DIR/agentic-llm/nat_wrapper/logs"
+mkdir -p "$NAT_LOG_DIR"
+
+# Create profiles directory for NAT server
+NAT_PROFILES_DIR="$ROOT_DIR/agentic-llm/nat_wrapper/profiles"
+mkdir -p "$NAT_PROFILES_DIR"
+chmod 755 "$NAT_PROFILES_DIR" 2>/dev/null || true
+
+# Set NAT server configuration
+NAT_CONFIG_FILE="$ROOT_DIR/agentic-llm/nat_wrapper/src/nat_5g_slicing/configs/config.yml"
+NAT_LOG_FILE="$NAT_LOG_DIR/nat_server.log"
+
+# Enable Phoenix observability for NAT server
+export PHOENIX_ENABLED=true
+export PHOENIX_ENDPOINT=http://0.0.0.0:6006
+
+# Start NAT server in background with Phoenix enabled
+cd "$ROOT_DIR/agentic-llm/nat_wrapper"
+
+log "Starting NAT server with Phoenix observability enabled..."
+
+if PHOENIX_ENABLED=true PHOENIX_ENDPOINT=http://0.0.0.0:6006 nohup nat serve \
+    --config_file "$NAT_CONFIG_FILE" \
+    --host 0.0.0.0 \
+    --port 4999 > "$NAT_LOG_FILE" 2>&1 &
+then
+    NAT_PID=$!
+    sleep 3
+
+    # Verify NAT server is still running
+    if kill -0 $NAT_PID 2>/dev/null; then
+        log_success "NAT server started on port 4999 (PID: $NAT_PID)"
+        log "NAT server log: $NAT_LOG_FILE"
+
+        # Check for Phoenix initialization in logs
+        sleep 2
+        if grep -q "Phoenix observability enabled\|To view the Phoenix app" "$NAT_LOG_FILE" 2>/dev/null; then
+            log_success "Phoenix launched with NAT server"
+            log_success "Phoenix UI: http://localhost:6006"
+            log "Note: Phoenix is embedded with NAT and will stop when NAT stops"
+        else
+            log_warning "Phoenix observability may not be enabled (check $NAT_LOG_FILE)"
+        fi
+
+        # Wait for NAT server to be fully initialized
+        log "Waiting for NAT server to be ready (may take 30-60 seconds)..."
+        NAT_READY=false
+
+        for i in {1..30}; do
+            if curl -s http://localhost:4999/health > /dev/null 2>&1; then
+                log_success "NAT server is ready and responding"
+                NAT_READY=true
+                break
+            fi
+
+            # Show progress every 5 seconds
+            if [ $((i % 5)) -eq 0 ]; then
+                log "Still waiting for NAT... ($i/30 attempts)"
+            fi
+
+            sleep 2
+        done
+
+        if [ "$NAT_READY" = false ]; then
+            log_warning "NAT health check timed out after 60 seconds"
+            log "NAT may still be initializing. Check: curl http://localhost:4999/health"
+            log "Monitor logs: tail -f $NAT_LOG_FILE"
+        fi
+    else
+        log_error "NAT server failed to start, check $NAT_LOG_FILE for errors"
+    fi
+else
+    log_error "Failed to start NAT server"
+fi
+
+cd "$SCRIPT_DIR"
+echo ""
+
 echo "========================================"
 log_success "Lab startup completed!"
 echo "========================================"
@@ -453,6 +615,18 @@ echo "Traffic Generation:"
 echo "  - Traffic generator log: tail -f $TRAFFIC_LOG"
 echo "  - iperf3 servers running on: oai-ext-dn (192.168.70.135:5201, 5202)"
 echo "  - Stop traffic: pkill -f generate_traffic.py"
+echo ""
+echo "NAT Server & Observability:"
+echo "  - NAT Server API: http://localhost:4999 (NeMo Agent Toolkit)"
+echo "  - NAT Server logs: tail -f $ROOT_DIR/agentic-llm/nat_wrapper/logs/nat_server.log"
+echo "  - Phoenix UI: http://localhost:6006 (Observability & Tracing - embedded with NAT)"
+echo "  - Phoenix Status: Automatically launched with NAT server"
+echo ""
+echo "Management Commands:"
+echo "  - Stop NAT + Phoenix: pkill -f 'nat serve' (stops both NAT and Phoenix)"
+echo "  - Restart NAT + Phoenix: cd $ROOT_DIR/agentic-llm/nat_wrapper && PHOENIX_ENABLED=true nat serve --config_file src/nat_5g_slicing/configs/config.yml --port 4999"
+echo ""
+echo "Note: Phoenix is embedded with NAT. Stopping NAT will also stop Phoenix."
 echo ""
 echo "Monitoring & Visualization:"
 echo "  - Streamlit UI: http://localhost:8501 (click 'Start Monitoring' to view AI agent logs)"

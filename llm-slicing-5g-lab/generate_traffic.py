@@ -317,9 +317,8 @@ def simulate_ue3_metrics(ue1_record, target_bandwidth, ue1_bandwidth):
         "total_packets": total_packets,
     }
 
-    # Also add loss to UE1 record for realism (modify the original record)
-    ue1_record["loss_percentage"] = base_loss_ue1
-    ue1_record["lost_packets"] = int(ue1_record["total_packets"] * (base_loss_ue1 / 100.0))
+    # Using real iperf3 packet loss for UE1 (not simulated)
+    # Real values are already captured from iperf3 output parsing
 
     return ue3_record
 

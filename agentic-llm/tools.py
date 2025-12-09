@@ -31,8 +31,18 @@ config_file = yaml.safe_load(open('config.yaml', 'r'))
 logging.basicConfig(
     filename= config_file['AGENT_LOG_FILE'],  # Log file name
     level=logging.INFO,   # Log level
-    format="%(message)s"  # Only log the message
+    format="%(message)s",  # Only log the message
+    force=True  # Override any existing logging config
 )
+
+# Get the root logger and disable buffering
+logger = logging.getLogger()
+for handler in logger.handlers:
+    handler.setLevel(logging.INFO)
+    handler.flush()
+    # Force immediate flush after each log by disabling buffering
+    if hasattr(handler, 'stream'):
+        handler.stream.reconfigure(line_buffering=True)
 
 # Configure for Kinetica instance (use container IP when running in Docker)
 os.environ["KINETICA_HOST"] = os.getenv("KINETICA_HOST", "192.168.70.172:9191")
@@ -114,23 +124,34 @@ def reconfigure_network(UE: str, value_1_old: int, value_2_old: int):
 @tool
 def get_packetloss_logs() -> str:
     """
-    Get the logs to determine which UE is failing.                    
-    """ 
+    Get the logs to determine which UE is failing.
+    FIXED: Now uses time-based filtering (last 30 seconds) to avoid stale data.
+    """
     time.sleep(2) #to improve logging
     logging.info(f"This is get_packetloss_logs Tool \n")
-    logging.info("\nRetrieving packet loss logs from database\n")
+    logging.info("\nRetrieving packet loss logs from database (FIXED: time-based filtering)\n")
     time.sleep(5) # wait for db to get updated
     iperf_random_table_name: str = os.getenv('IPERF3_RANDOM_TABLE_NAME')
     # Just to be sure we have the latest randomly generated table name
     load_dotenv(find_dotenv())
-        
-    sql_query = f"SELECT lost_packets, loss_percentage, UE FROM {os.getenv('IPERF3_RANDOM_TABLE_NAME')} ORDER BY timestamp DESC LIMIT 20;"
+
+    # FIXED: Use time-based filtering instead of LIMIT to avoid stale data
+    # This matches the MonitoringAgent's 30-second window
+    sql_query = f"""
+    SELECT lost_packets, loss_percentage, UE, timestamp
+    FROM {os.getenv('IPERF3_RANDOM_TABLE_NAME')}
+    WHERE timestamp > NOW() - INTERVAL '30' SECOND
+    ORDER BY timestamp DESC;
+    """
+
+    logging.info(f"Query: {sql_query}")
     result_df: pd.DataFrame = kdbc.to_df(
         sql=sql_query
     )
-    
+
     if result_df is None or result_df.empty:
         return "WARNING: A Problem has occurred. No results were found at this time. Please try again later."
-    
-    
+
+    logging.info(f"Retrieved {len(result_df)} records from last 30 seconds\n")
+
     return result_df.to_string(index=False)
