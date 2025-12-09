@@ -334,33 +334,152 @@ else
 fi
 echo ""
 
-# Step 13: Start UE (Slice 1)
-# Note: Running multiple UEs in Docker host mode with RF simulator causes conflicts
-# For production, use network namespaces or separate RF simulator instances
-log "Step 13: Starting UE (Slice 1)..."
-docker compose -f docker-compose-ue-host.yaml up -d oai-ue-slice1 2>&1 | tee -a "$LOG_FILE"
-wait_for_healthy "oai-ue-slice1" 60
-log_success "UE (Slice 1) is running"
-echo ""
+# Step 13: Create network namespaces for UEs
+log "Step 13: Creating network namespaces for UEs..."
+cd ..
+LAB_DIR=$(pwd)  # Save the lab directory path for UE startup
 
-# Step 14: Verify UE connection
-log "Step 14: Verifying UE connection..."
-sleep 10
-if docker logs oai-ue-slice1 2>&1 | grep -q "REGISTRATION ACCEPT"; then
-    log_success "UE successfully registered with 5G Core"
+# Enable IP forwarding (required for namespace routing)
+sudo sysctl -w net.ipv4.ip_forward=1 > /dev/null
 
-    # Check for IP address assignment
-    if docker logs oai-ue-slice1 2>&1 | grep -q "Interface oaitun_ue1 successfully configured"; then
-        ue_ip=$(docker logs oai-ue-slice1 2>&1 | grep "Interface oaitun_ue1 successfully configured" | tail -1 | grep -oP 'ip address \K[0-9.]+')
-        log_success "UE assigned IP address: $ue_ip"
-    fi
+# Clean up any existing namespaces
+sudo ./multi_ue.sh -d 1 2>/dev/null || true
+sudo ./multi_ue.sh -d 2 2>/dev/null || true
+sleep 1
+
+# Create namespace for UE1
+log "Creating namespace for UE1..."
+sudo ./multi_ue.sh -c 1 2>&1 | tee -a "$LOG_FILE"
+if [ ${PIPESTATUS[0]} -eq 0 ]; then
+    log_success "Namespace ue1 created"
 else
-    log_warning "UE registration not confirmed, checking logs..."
+    log_error "Failed to create namespace ue1"
+    exit 1
+fi
+
+# Create namespace for UE2
+log "Creating namespace for UE2..."
+sudo ./multi_ue.sh -c 2 2>&1 | tee -a "$LOG_FILE"
+if [ ${PIPESTATUS[0]} -eq 0 ]; then
+    log_success "Namespace ue2 created"
+else
+    log_error "Failed to create namespace ue2"
+    exit 1
+fi
+
+# Verify namespaces exist
+if ip netns list | grep -q "ue1" && ip netns list | grep -q "ue2"; then
+    log_success "Both namespaces verified"
+else
+    log_error "Namespace verification failed"
+    exit 1
 fi
 echo ""
 
-# Step 15: Start Monitoring Stack (Optional)
-log "Step 15: Starting Monitoring Stack (InfluxDB, Grafana, Kinetica, Streamlit)..."
+# Step 14: Start UE1 in namespace
+log "Step 14: Starting UE1 in namespace..."
+UE1_LOG="$LOG_DIR/UE1.log"
+
+# Define paths
+UE_BINARY="$LAB_DIR/openairinterface5g/cmake_targets/ran_build/build/nr-uesoftmodem"
+UE1_CONF="$LAB_DIR/ran-conf/ue_1.conf"
+
+# Start UE1 in background (remove nested sudo, use explicit paths)
+sudo ip netns exec ue1 bash -c "\
+    cd $LAB_DIR && \
+    LD_LIBRARY_PATH=$LAB_DIR $UE_BINARY \
+    --rfsimulator.serveraddr 192.168.70.151 \
+    -r 106 \
+    --numerology 1 \
+    --band 78 \
+    -C 3619200000 \
+    --rfsim \
+    --sa \
+    -O $UE1_CONF \
+    -E \
+    --log_config.global_log_level info" > "$UE1_LOG" 2>&1 &
+
+UE1_PID=$!
+sleep 5
+
+# Verify UE1 is still running
+if kill -0 $UE1_PID 2>/dev/null; then
+    log_success "UE1 started in namespace ue1 (PID: $UE1_PID)"
+    log "UE1 log: $UE1_LOG"
+else
+    log_error "UE1 failed to start, check $UE1_LOG"
+fi
+echo ""
+
+# Step 15: Start UE2 in namespace
+log "Step 15: Starting UE2 in namespace..."
+UE2_LOG="$LOG_DIR/UE2.log"
+
+# Define paths
+UE2_CONF="$LAB_DIR/ran-conf/ue_2.conf"
+
+# Wait a bit before starting UE2
+sleep 3
+
+# Start UE2 in background (remove nested sudo, use explicit paths)
+sudo ip netns exec ue2 bash -c "\
+    cd $LAB_DIR && \
+    LD_LIBRARY_PATH=$LAB_DIR $UE_BINARY \
+    --rfsimulator.serveraddr 192.168.70.151 \
+    -r 106 \
+    --numerology 1 \
+    --band 78 \
+    -C 3619200000 \
+    --rfsim \
+    --sa \
+    -O $UE2_CONF \
+    -E \
+    --log_config.global_log_level info" > "$UE2_LOG" 2>&1 &
+
+UE2_PID=$!
+sleep 5
+
+# Verify UE2 is still running
+if kill -0 $UE2_PID 2>/dev/null; then
+    log_success "UE2 started in namespace ue2 (PID: $UE2_PID)"
+    log "UE2 log: $UE2_LOG"
+else
+    log_error "UE2 failed to start, check $UE2_LOG"
+fi
+
+# Wait for UEs to register
+log "Waiting for UEs to register with 5G Core..."
+sleep 15
+
+# Verify UE1 registration
+if grep -q "REGISTRATION ACCEPT" "$UE1_LOG" 2>/dev/null; then
+    log_success "UE1 successfully registered with 5G Core"
+    # Try to extract IP address
+    if grep -q "Interface oaitun_ue1 successfully configured" "$UE1_LOG" 2>/dev/null; then
+        ue1_ip=$(grep "Interface oaitun_ue1 successfully configured" "$UE1_LOG" | tail -1 | grep -oP 'ip address \K[0-9.]+' || echo "unknown")
+        log_success "UE1 assigned IP address: $ue1_ip"
+    fi
+else
+    log_warning "UE1 registration not confirmed, check $UE1_LOG"
+fi
+
+# Verify UE2 registration
+if grep -q "REGISTRATION ACCEPT" "$UE2_LOG" 2>/dev/null; then
+    log_success "UE2 successfully registered with 5G Core"
+    # Try to extract IP address
+    if grep -q "Interface oaitun_ue2 successfully configured" "$UE2_LOG" 2>/dev/null; then
+        ue2_ip=$(grep "Interface oaitun_ue2 successfully configured" "$UE2_LOG" | tail -1 | grep -oP 'ip address \K[0-9.]+' || echo "unknown")
+        log_success "UE2 assigned IP address: $ue2_ip"
+    fi
+else
+    log_warning "UE2 registration not confirmed, check $UE2_LOG"
+fi
+
+cd docker
+echo ""
+
+# Step 16: Start Monitoring Stack (Optional)
+log "Step 16: Starting Monitoring Stack (InfluxDB, Grafana, Kinetica, Streamlit)..."
 if docker compose -f docker-compose-monitoring.yaml up -d 2>&1 | tee -a "$LOG_FILE"; then
     log "Monitoring services starting..."
     wait_for_healthy "influxdb" 60
@@ -373,8 +492,8 @@ else
 fi
 echo ""
 
-# Step 16: Start iperf3 servers on external DN
-log "Step 16: Starting iperf3 servers on external data network..."
+# Step 17: Start iperf3 servers on external DN
+log "Step 17: Starting iperf3 servers on external data network..."
 
 # Kill any existing iperf3 servers first
 docker exec oai-ext-dn pkill iperf3 2>/dev/null || true
@@ -403,8 +522,8 @@ else
 fi
 echo ""
 
-# Step 17: Start traffic generator
-log "Step 17: Starting traffic generator..."
+# Step 18: Start traffic generator
+log "Step 18: Starting traffic generator..."
 cd ..
 TRAFFIC_LOG="$LOG_DIR/traffic_gen_final.log"
 AGENT_LOG="$LOG_DIR/agent.log"
@@ -452,8 +571,8 @@ fi
 cd docker
 echo ""
 
-# Step 18: Start AI Agents (LangGraph)
-log "Step 18: Starting AI Agents for autonomous network slicing..."
+# Step 19: Start AI Agents (LangGraph)
+log "Step 19: Starting AI Agents for autonomous network slicing..."
 cd "$ROOT_DIR/agentic-llm"
 
 # Create logs directory for agents with correct permissions
@@ -492,24 +611,32 @@ fi
 cd "$SCRIPT_DIR"
 echo ""
 
-# Step 19: Display system status
-log "Step 19: System Status Summary"
+# Step 20: Display system status
+log "Step 20: System Status Summary"
 echo ""
 echo "Running Containers:"
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "NAME|oai-|flexric|influx|grafana|kinetica|streamlit"
 echo ""
 
-# Step 19: Quick connectivity test
-log "Step 19: Testing UE connectivity..."
-if docker exec oai-ue-slice1 ping -I oaitun_ue1 -c 2 8.8.8.8 &>/dev/null; then
-    log_success "UE has internet connectivity!"
+# Step 21: Quick connectivity test
+log "Step 21: Testing UE connectivity..."
+# Test UE1 connectivity from namespace
+if sudo ip netns exec ue1 ping -I oaitun_ue1 -c 2 192.168.70.135 &>/dev/null; then
+    log_success "UE1 has connectivity to external DN!"
 else
-    log_warning "UE connectivity test failed"
+    log_warning "UE1 connectivity test failed"
+fi
+
+# Test UE2 connectivity from namespace
+if sudo ip netns exec ue2 ping -I oaitun_ue2 -c 2 192.168.70.135 &>/dev/null; then
+    log_success "UE2 has connectivity to external DN!"
+else
+    log_warning "UE2 connectivity test failed"
 fi
 echo ""
 
-# Step 20: Start NAT Server (after all infrastructure is ready)
-log "Step 20: Starting NAT Server with Phoenix observability..."
+# Step 22: Start NAT Server (after all infrastructure is ready)
+log "Step 22: Starting NAT Server with Phoenix observability..."
 log "Note: NAT requires full system initialization (5G network + Kinetica)"
 
 # Kill any existing NAT server process
@@ -609,7 +736,10 @@ echo ""
 echo "5G Network Access:"
 echo "  - View FlexRIC logs: docker logs -f flexric"
 echo "  - View gNodeB logs: docker logs -f oai-gnb"
-echo "  - View UE logs: docker logs -f oai-ue-slice1"
+echo "  - View UE1 logs: tail -f $LOG_DIR/UE1.log"
+echo "  - View UE2 logs: tail -f $LOG_DIR/UE2.log"
+echo "  - Access UE1 namespace: sudo ip netns exec ue1 bash"
+echo "  - Access UE2 namespace: sudo ip netns exec ue2 bash"
 echo ""
 echo "Traffic Generation:"
 echo "  - Traffic generator log: tail -f $TRAFFIC_LOG"
