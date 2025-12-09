@@ -23,3 +23,5 @@ llm-slicing-5g-lab/kinetica-data/
 
 
 *.DS_Store
+
+.next/
