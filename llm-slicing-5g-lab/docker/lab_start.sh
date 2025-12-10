@@ -539,7 +539,11 @@ echo ""
 log "Step 18: Starting traffic generator..."
 cd ..
 TRAFFIC_LOG="$LOG_DIR/traffic_gen_final.log"
-AGENT_LOG="$LOG_DIR/agent.log"
+# FIXED: Point to the correct agent.log that Streamlit and AI agents use
+AGENT_LOG="$ROOT_DIR/agentic-llm/logs/agent.log"
+
+# Create agentic-llm/logs directory if it doesn't exist
+mkdir -p "$ROOT_DIR/agentic-llm/logs"
 
 # Kill any existing traffic generator and log streaming
 pkill -f "generate_traffic.py" 2>/dev/null || true
