@@ -488,6 +488,50 @@ else
     log_warning "UE2 registration not confirmed, check $UE2_LOG"
 fi
 
+# Additional verification: Wait for UE interfaces to be accessible in namespaces
+log "Verifying UE network interfaces are accessible in namespaces..."
+UE1_READY=false
+UE2_READY=false
+
+for attempt in {1..30}; do
+    # Check if UE1 interface is accessible in namespace
+    if ! $UE1_READY && sudo ip netns exec ue1 ip addr show oaitun_ue1 &>/dev/null; then
+        if sudo ip netns exec ue1 ip addr show oaitun_ue1 | grep -q "inet "; then
+            UE1_READY=true
+            log_success "UE1 interface oaitun_ue1 is accessible in namespace ue1"
+        fi
+    fi
+
+    # Check if UE2 interface is accessible in namespace
+    if ! $UE2_READY && sudo ip netns exec ue2 ip addr show oaitun_ue1 &>/dev/null; then
+        if sudo ip netns exec ue2 ip addr show oaitun_ue1 | grep -q "inet "; then
+            UE2_READY=true
+            log_success "UE2 interface oaitun_ue1 is accessible in namespace ue2"
+        fi
+    fi
+
+    # If both are ready, break early
+    if $UE1_READY && $UE2_READY; then
+        log_success "Both UE interfaces verified and ready for traffic generation"
+        break
+    fi
+
+    # Show progress every 5 attempts
+    if [ $((attempt % 5)) -eq 0 ]; then
+        log "Still waiting for UE interfaces... (attempt $attempt/30)"
+    fi
+
+    sleep 2
+done
+
+# Warn if interfaces are not ready
+if ! $UE1_READY; then
+    log_warning "UE1 interface not verified in namespace - traffic generation may fail"
+fi
+if ! $UE2_READY; then
+    log_warning "UE2 interface not verified in namespace - traffic generation may fail"
+fi
+
 cd docker
 echo ""
 
