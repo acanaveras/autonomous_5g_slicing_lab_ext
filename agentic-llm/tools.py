@@ -154,4 +154,13 @@ def get_packetloss_logs() -> str:
 
     logging.info(f"Retrieved {len(result_df)} records from last 30 seconds\n")
 
-    return result_df.to_string(index=False)
+    # Return summary instead of full dataframe to reduce log clutter
+    summary = result_df.groupby('UE').agg({
+        'loss_percentage': ['mean', 'max', 'min'],
+        'lost_packets': 'sum'
+    }).round(2)
+
+    summary_str = f"Packet Loss Summary (Last 30 seconds):\n{summary.to_string()}\n\n"
+    summary_str += f"Total records analyzed: {len(result_df)}"
+
+    return summary_str
