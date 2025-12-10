@@ -586,19 +586,23 @@ TRAFFIC_LOG="$LOG_DIR/traffic_gen_final.log"
 # FIXED: Point to the correct agent.log that Streamlit and AI agents use
 AGENT_LOG="$ROOT_DIR/agentic-llm/logs/agent.log"
 
-# Create agentic-llm/logs directory if it doesn't exist
+# Create agentic-llm/logs directory with proper permissions
 mkdir -p "$ROOT_DIR/agentic-llm/logs"
+sudo chmod 777 "$ROOT_DIR/agentic-llm/logs" 2>/dev/null || chmod 777 "$ROOT_DIR/agentic-llm/logs"
 
 # Kill any existing traffic generator and log streaming
 pkill -f "generate_traffic.py" 2>/dev/null || true
 pkill -f "tail -f.*traffic_gen_final.log" 2>/dev/null || true
 sleep 1
 
+# Create agent.log with proper permissions if it doesn't exist
+touch "$AGENT_LOG" 2>/dev/null || sudo touch "$AGENT_LOG"
+sudo chmod 666 "$AGENT_LOG" 2>/dev/null || chmod 666 "$AGENT_LOG"
+
 # Initialize agent.log with header
 echo "=== 5G Network Traffic Generation Log ===" > "$AGENT_LOG"
 echo "=== Started: $(date) ===" >> "$AGENT_LOG"
 echo "" >> "$AGENT_LOG"
-chmod 666 "$AGENT_LOG" 2>/dev/null || true
 
 # Start traffic generator in background
 if python3 generate_traffic.py > "$TRAFFIC_LOG" 2>&1 &
