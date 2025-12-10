@@ -89,10 +89,10 @@ echo ""
 log "Step 1: Checking System Build Dependencies..."
 # Check if autoreconf exists, if not, install the suite
 if ! command -v autoreconf &> /dev/null; then
-    log "Installing autoconf, automake, libtool, autotools, bison, flex, build-essential, cmake"
+    log "Installing autoconf, automake, libtool, autotools, bison, flex, build-essential, cmake, iperf3"
     # Using sudo as this modifies the system
     sudo apt-get update
-    sudo apt-get install -y autoconf automake libtool bison flex build-essential cmake
+    sudo apt-get install -y autoconf automake libtool bison flex build-essential cmake iperf3
     
     if [ $? -eq 0 ]; then
         log_success "System build dependencies installed"
@@ -102,6 +102,19 @@ if ! command -v autoreconf &> /dev/null; then
     fi
 else
     log_success "System build dependencies already present"
+fi
+
+# Ensure iperf3 is installed (required for UE namespaces to run traffic tests)
+if ! command -v iperf3 &> /dev/null; then
+    log "Installing iperf3 (required for traffic generation in UE namespaces)..."
+    sudo apt-get update && sudo apt-get install -y iperf3
+    if [ $? -eq 0 ]; then
+        log_success "iperf3 installed"
+    else
+        log_error "Failed to install iperf3. Traffic generation will not work."
+    fi
+else
+    log_success "iperf3 already installed"
 fi
 echo ""
 
