@@ -122,18 +122,23 @@ def MonitoringAgent(state: State):
     instead of log files for buffer errors
     """
     response = "This is a Monitoring agent, monitoring PACKET LOSS METRICS for network issues."
-    logging.info("\n" + "="*80)
-    logging.info(response)
-    logging.info("="*80 + "\n")
+
+    # Only log the agent start message once
+    if state.get('count', 0) == 0:
+        logging.info("\n" + "="*80)
+        logging.info(response)
+        logging.info("="*80 + "\n")
 
     # Configuration
     PACKET_LOSS_THRESHOLD = 1.5  # Trigger reconfiguration if loss > 1.5%
     CHECK_INTERVAL = 10  # Check every 10 seconds
 
-    logging.info(f"📊 Monitoring Configuration:")
-    logging.info(f"   - Packet Loss Threshold: {PACKET_LOSS_THRESHOLD}%")
-    logging.info(f"   - Check Interval: {CHECK_INTERVAL} seconds")
-    logging.info(f"   - Data Source: Kinetica Database\n")
+    # Only log configuration on first run
+    if state.get('count', 0) == 0:
+        logging.info(f"📊 Monitoring Configuration:")
+        logging.info(f"   - Packet Loss Threshold: {PACKET_LOSS_THRESHOLD}%")
+        logging.info(f"   - Check Interval: {CHECK_INTERVAL} seconds")
+        logging.info(f"   - Data Source: Kinetica Database\n")
 
     #Keep monitoring packet loss metrics
     while True:
@@ -154,7 +159,7 @@ def MonitoringAgent(state: State):
             GROUP BY ue
             """
 
-            logging.info(f"🔍 Querying packet loss metrics from Kinetica...")
+            # Query without logging - reduces verbosity
             result_df = kdbc.to_df(sql=sql_query)
 
             if result_df is None or result_df.empty:
@@ -162,15 +167,15 @@ def MonitoringAgent(state: State):
                 time.sleep(CHECK_INTERVAL)
                 continue
 
-            # Log current metrics
-            logging.info(f"\n📊 Current Network Metrics (Last 30 seconds):")
-            for _, row in result_df.iterrows():
-                logging.info(f"   - {row['ue']}: Avg Loss={row['avg_loss']:.2f}%, Max Loss={row['max_loss']:.2f}%, Samples={row['samples']}")
-
             # Check if any UE exceeds threshold
             high_loss_ues = result_df[result_df['max_loss'] > PACKET_LOSS_THRESHOLD]
 
             if not high_loss_ues.empty:
+                # Only log when there's an issue
+                logging.info(f"\n📊 Current Network Metrics (Last 30 seconds):")
+                for _, row in result_df.iterrows():
+                    logging.info(f"   - {row['ue']}: Avg Loss={row['avg_loss']:.2f}%, Max Loss={row['max_loss']:.2f}%, Samples={row['samples']}")
+
                 logging.info(f"\n🚨 HIGH PACKET LOSS DETECTED!")
                 for _, row in high_loss_ues.iterrows():
                     logging.info(f"   - {row['ue']}: {row['max_loss']:.2f}% loss (threshold: {PACKET_LOSS_THRESHOLD}%)")
@@ -203,8 +208,7 @@ def MonitoringAgent(state: State):
                     "consent": state.get('consent', 'yes')
                 }
             else:
-                logging.info(f"✓ All UEs within acceptable packet loss range (< {PACKET_LOSS_THRESHOLD}%)")
-                logging.info(f"   Continuing monitoring in {CHECK_INTERVAL} seconds...\n")
+                # No logging when everything is normal - reduces log clutter
                 time.sleep(CHECK_INTERVAL)
 
         except Exception as e:
