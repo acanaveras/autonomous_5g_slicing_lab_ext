@@ -7,11 +7,11 @@ from typing import Pattern
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-def get_ue_ip(container_name: str = "oai-ue-slice1") -> str:
-    """Auto-detect UE IP address from the container"""
+def get_ue_ip(namespace: str = "ue1", interface: str = "oaitun_ue1") -> str:
+    """Auto-detect UE IP address from the namespace (UPDATED FOR NAMESPACES)"""
     try:
         result = subprocess.run(
-            ["docker", "exec", container_name, "ip", "addr", "show", "oaitun_ue1"],
+            ["sudo", "ip", "netns", "exec", namespace, "ip", "addr", "show", interface],
             capture_output=True,
             text=True,
             timeout=5
@@ -32,7 +32,7 @@ def get_ue_ip(container_name: str = "oai-ue-slice1") -> str:
         try:
             # Test ping to see if interface responds
             result = subprocess.run(
-                ["docker", "exec", container_name, "ping", "-I", ip, "-c", "1", "-W", "1", "192.168.70.135"],
+                ["sudo", "ip", "netns", "exec", namespace, "ping", "-I", ip, "-c", "1", "-W", "1", "192.168.70.135"],
                 capture_output=True,
                 timeout=3
             )
@@ -140,18 +140,19 @@ def write_to_influxdb(ue_name: str, record: dict):
     except Exception as e:
         pass  # Silent fail for InfluxDB
 
-def iperf_runner_single(ue_container, ue_name, bind_host, server_host, udp_port, bandwidth, test_length_secs, log_file):
-    """Run a single iperf test (not continuous)"""
+def iperf_runner_single(ue_namespace, ue_name, bind_host, server_host, udp_port, bandwidth, test_length_secs, log_file):
+    """Run a single iperf test (not continuous) - UPDATED FOR NAMESPACES"""
     try:
-        # CRITICAL FIX: Use unbuffered Python + immediate flush
+        # Run iperf3 in namespace instead of Docker container (use full path with LD_LIBRARY_PATH)
         iperf_cmd = [
-            "docker", "exec", ue_container,
-            "iperf3", "-B", bind_host, "-c", server_host,
+            "sudo", "ip", "netns", "exec", ue_namespace,
+            "env", "LD_LIBRARY_PATH=/usr/lib:/lib",
+            "/usr/bin/iperf3", "-B", bind_host, "-c", server_host,
             "-p", str(udp_port), "-R", "-u", "-b", bandwidth,
             "-t", str(test_length_secs), "--forceflush"  # Force immediate output
         ]
 
-        logger.info(f"🚀 [{ue_name}] Starting iperf test ({bandwidth}, {test_length_secs}s)")
+        logger.info(f"🚀 [{ue_name}] Starting iperf test in namespace {ue_namespace} ({bandwidth}, {test_length_secs}s)")
 
         proc = subprocess.Popen(
             iperf_cmd,
@@ -209,13 +210,13 @@ def iperf_runner_single(ue_container, ue_name, bind_host, server_host, udp_port,
     except Exception as e:
         logger.error(f"❌ Error in {ue_name}: {e}")
 
-# Helper function to get UE IP with retry
-def get_ue_ip_with_retry(container_name: str, interface: str, max_retries: int = 5) -> str:
-    """Auto-detect UE IP address with retry logic"""
+# Helper function to get UE IP with retry (UPDATED FOR NAMESPACES)
+def get_ue_ip_with_retry(namespace: str, interface: str, max_retries: int = 5) -> str:
+    """Auto-detect UE IP address from namespace with retry logic"""
     for attempt in range(max_retries):
         try:
             result = subprocess.run(
-                ["docker", "exec", container_name, "ip", "addr", "show", interface],
+                ["sudo", "ip", "netns", "exec", namespace, "ip", "addr", "show", interface],
                 capture_output=True,
                 text=True,
                 timeout=5
@@ -224,38 +225,47 @@ def get_ue_ip_with_retry(container_name: str, interface: str, max_retries: int =
                 for line in result.stdout.split('\n'):
                     if 'inet ' in line and '/24' in line:
                         ip = line.strip().split()[1].split('/')[0]
-                        logger.info(f"✅ Auto-detected {container_name} IP: {ip}")
+                        logger.info(f"✅ Auto-detected {namespace} ({interface}) IP: {ip}")
                         return ip
         except Exception as e:
-            logger.warning(f"Attempt {attempt + 1}/{max_retries} failed for {container_name}: {e}")
+            logger.warning(f"Attempt {attempt + 1}/{max_retries} failed for {namespace}: {e}")
             time.sleep(2)
 
-    logger.error(f"❌ Could not determine IP for {container_name}")
+    logger.error(f"❌ Could not determine IP for {namespace}")
     return None
 
-# Start traffic generation with bandwidth alternation and UE2 simulation
+# Start traffic generation with bandwidth alternation for both UE1 and UE2
 logger.info("="*60)
-logger.info("🚀 CONTINUOUS TRAFFIC GENERATION (UE1 + Simulated UE2)")
+logger.info("🚀 CONTINUOUS TRAFFIC GENERATION (UE1 + UE2 - REAL TRAFFIC)")
 logger.info("="*60)
 
-# Auto-detect UE1 IP address
-ue1_ip = get_ue_ip_with_retry("oai-ue-slice1", "oaitun_ue1")
+# Auto-detect UE1 IP address from namespace ue1
+ue1_ip = get_ue_ip_with_retry("ue1", "oaitun_ue1")
 
 if not ue1_ip:
-    logger.error("❌ Failed to detect UE1 IP address. Exiting...")
+    logger.error("❌ Failed to detect UE1 IP address from namespace ue1. Exiting...")
+    exit(1)
+
+# Auto-detect UE2 IP address from namespace ue2
+# Note: UE2 also creates oaitun_ue1 (not ue2) because it's in a separate namespace
+ue2_ip = get_ue_ip_with_retry("ue2", "oaitun_ue1")
+
+if not ue2_ip:
+    logger.error("❌ Failed to detect UE2 IP address from namespace ue2. Exiting...")
     exit(1)
 
 logger.info(f"Using UE1 IP: {ue1_ip}")
+logger.info(f"Using UE2 IP: {ue2_ip}")
 logger.info("")
-logger.info("📝 Note: UE2 is simulated (Docker RF simulator limitation)")
-logger.info("   - UE1: Real iperf traffic with alternating bandwidth")
-logger.info("   - UE2: Simulated metrics with inverse bandwidth pattern")
-logger.info("   - This demonstrates slicing behavior in Grafana dashboard")
+logger.info("📝 Both UE1 and UE2 will run REAL iperf3 traffic")
+logger.info("   - UE1: Real iperf traffic to port 5201 with alternating bandwidth")
+logger.info("   - UE2: Real iperf traffic to port 5202 with inverse bandwidth pattern")
+logger.info("   - This demonstrates real slicing behavior in Grafana dashboard")
 logger.info("")
 
 # Initial bandwidth settings (opposite patterns for UE1 and UE2)
 bandwidth_ue1 = "30M"
-bandwidth_ue2_simulated = "120M"  # Inverse of UE1
+bandwidth_ue2 = "120M"  # Inverse of UE1
 test_length_secs = 60  # Each iteration runs for 60 seconds
 iteration = 0
 
@@ -263,9 +273,6 @@ logger.info("🔄 Starting bandwidth alternation pattern:")
 logger.info("   - UE1 and UE2 will alternate between 30M and 120M")
 logger.info("   - Pattern shows effect of dynamic bandwidth slicing")
 logger.info("")
-
-# Track UE1 metrics for UE2 simulation
-ue1_last_metrics = []
 
 def simulate_ue2_metrics(ue1_record, target_bandwidth, ue1_bandwidth):
     """Create realistic UE2 metrics based on UE1 pattern but different bandwidth"""
@@ -322,18 +329,18 @@ def simulate_ue2_metrics(ue1_record, target_bandwidth, ue1_bandwidth):
 
     return ue2_record
 
-def iperf_runner_with_ue2_sim(ue_container, ue_name, bind_host, server_host, udp_port, bandwidth, test_length_secs, log_file, ue2_bandwidth):
-    """Run iperf for UE1 and simulate UE2 metrics"""
+def iperf_runner_with_ue2_sim(ue_namespace, ue_name, bind_host, server_host, udp_port, bandwidth, test_length_secs, log_file, ue2_bandwidth):
+    """Run iperf for UE1 and simulate UE2 metrics - UPDATED FOR NAMESPACES"""
     global ue1_last_metrics
     try:
         iperf_cmd = [
-            "docker", "exec", ue_container,
-            "iperf3", "-B", bind_host, "-c", server_host,
+            "sudo", "ip", "netns", "exec", ue_namespace,
+            "/usr/bin/iperf3", "-B", bind_host, "-c", server_host,
             "-p", str(udp_port), "-R", "-u", "-b", bandwidth,
             "-t", str(test_length_secs), "--forceflush"
         ]
 
-        logger.info(f"🚀 [UE1] Starting iperf test ({bandwidth}, {test_length_secs}s)")
+        logger.info(f"🚀 [UE1] Starting iperf test in namespace {ue_namespace} ({bandwidth}, {test_length_secs}s)")
         logger.info(f"🎭 [UE2] Simulating with bandwidth {ue2_bandwidth}")
 
         proc = subprocess.Popen(
@@ -416,23 +423,40 @@ def iperf_runner_with_ue2_sim(ue_container, ue_name, bind_host, server_host, udp
 try:
     while True:
         iteration += 1
-        logger.info(f"📡 Iteration {iteration}: UE1={bandwidth_ue1}, UE2={bandwidth_ue2_simulated} (simulated)")
+        logger.info(f"📡 Iteration {iteration}: UE1={bandwidth_ue1}, UE2={bandwidth_ue2}")
 
-        # Run UE1 traffic with UE2 simulation
-        iperf_runner_with_ue2_sim(
-            "oai-ue-slice1", "UE1", ue1_ip, "192.168.70.135", 5201,
-            bandwidth_ue1, test_length_secs,
-            os.path.join(os.getcwd(), "logs", "UE1_iperfc.log"),
-            bandwidth_ue2_simulated
+        # Run UE1 and UE2 traffic in parallel using threads (UPDATED FOR NAMESPACES)
+        ue1_thread = threading.Thread(
+            target=iperf_runner_single,
+            args=("ue1", "UE1", ue1_ip, "192.168.70.135", 5201,
+                  bandwidth_ue1, test_length_secs,
+                  os.path.join(os.getcwd(), "logs", "UE1_iperfc.log"))
         )
+
+        ue2_thread = threading.Thread(
+            target=iperf_runner_single,
+            args=("ue2", "UE2", ue2_ip, "192.168.70.135", 5202,
+                  bandwidth_ue2, test_length_secs,
+                  os.path.join(os.getcwd(), "logs", "UE2_iperfc.log"))
+        )
+
+        # Start both threads
+        ue1_thread.start()
+        ue2_thread.start()
+
+        # Wait for both to complete
+        ue1_thread.join()
+        ue2_thread.join()
+
+        logger.info(f"✅ Iteration {iteration} completed for both UE1 and UE2")
 
         # Alternate bandwidths for next iteration (inverse pattern)
         if bandwidth_ue1 == "30M":
             bandwidth_ue1 = "120M"
-            bandwidth_ue2_simulated = "30M"
+            bandwidth_ue2 = "30M"
         else:
             bandwidth_ue1 = "30M"
-            bandwidth_ue2_simulated = "120M"
+            bandwidth_ue2 = "120M"
 
         # Small pause between iterations
         time.sleep(2)
