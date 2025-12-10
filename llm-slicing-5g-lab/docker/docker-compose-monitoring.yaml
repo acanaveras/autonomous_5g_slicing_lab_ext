@@ -130,6 +130,11 @@ services:
       - ../../agentic-llm/config.yaml:/app/config.yaml:ro
       - ../../.env:/app/.env:ro
       - ../../agentic-llm/logs:/app/logs
+      - ../../agentic-llm/agents.py:/app/agents.py:ro
+      - ../../agentic-llm/tools.py:/app/tools.py:ro
+      - ../../agentic-llm/langgraph_agent.py:/app/langgraph_agent.py:ro
+      - ../../agentic-llm/chatbot_DLI.py:/app/chatbot_DLI.py:ro
+      - ../../agentic-llm/influxdb_utils.py:/app/influxdb_utils.py:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
       interval: 30s

@@ -64,6 +64,10 @@ def pretty_print_message(update) -> str:
     if len(ns) != 0:
         for node_name, node_update in update.items():
             for message in convert_to_messages(node_update["messages"]):
+                # Skip tool messages to reduce log clutter (they can be very verbose)
+                if message.type == "tool":
+                    continue
+
                 output = f"[{message.type}]: {message.content}"
                 if isinstance(message, AIMessage) and hasattr(message, 'tool_calls'):
                     tools = "\n".join(
@@ -71,7 +75,7 @@ def pretty_print_message(update) -> str:
                         for tc in message.tool_calls
                     )
                     output += f"\nTools:\n{tools}"
-    
+
     return output
 
 #Build graph 
