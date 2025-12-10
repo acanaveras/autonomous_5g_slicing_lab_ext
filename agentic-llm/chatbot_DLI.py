@@ -295,8 +295,8 @@ if start_monitoring:
                 logger.error(f"Error fetching UE1 data from Kinetica: {error}")
 
             try:
-                # UE3 is simulated in InfluxDB only, not in Kinetica
-                # Skip Kinetica query for UE3 to avoid errors
+                # UE2 is simulated in InfluxDB only, not in Kinetica
+                # Skip Kinetica query for UE2 to avoid errors
                 pass
             except Exception as error:
                 logger.error(f"Error fetching UE2 data from Kinetica: {error}")

@@ -21,26 +21,83 @@ create_namespace() {
   ue_id=$1
   local name="ue$ue_id"
   echo "creating namespace for UE ID ${ue_id} name ${name}"
+
+  # Create namespace
   ip netns add $name
+
+  # Create veth pair
   ip link add v-eth$ue_id type veth peer name v-ue$ue_id
   ip link set v-ue$ue_id netns $name
+
+  # Calculate IP addresses (10.201.1.x for UE1, 10.202.1.x for UE2)
   BASE_IP=$((200+ue_id))
   ip addr add 10.$BASE_IP.1.100/24 dev v-eth$ue_id
   ip link set v-eth$ue_id up
-  iptables -t nat -A POSTROUTING -s 10.$BASE_IP.1.0/255.255.255.0 -o lo -j MASQUERADE
-  iptables -A FORWARD -i lo -o v-eth$ue_id -j ACCEPT
-  iptables -A FORWARD -o lo -i v-eth$ue_id -j ACCEPT
+
+  # Find Docker bridge interface for demo-oai-public-net
+  DOCKER_BRIDGE=$(docker network inspect demo-oai-public-net --format '{{index .Options "com.docker.network.bridge.name"}}' 2>/dev/null || echo "demo-oai")
+  if [ -z "$DOCKER_BRIDGE" ]; then
+    DOCKER_BRIDGE="demo-oai"
+  fi
+
+  # Set up NAT and forwarding to Docker network
+  iptables -t nat -A POSTROUTING -s 10.$BASE_IP.1.0/255.255.255.0 -o $DOCKER_BRIDGE -j MASQUERADE
+  iptables -A FORWARD -i $DOCKER_BRIDGE -o v-eth$ue_id -j ACCEPT
+  iptables -A FORWARD -o $DOCKER_BRIDGE -i v-eth$ue_id -j ACCEPT
+
+  # Also enable forwarding to all interfaces for general connectivity
+  iptables -A FORWARD -i v-eth$ue_id -j ACCEPT
+  iptables -A FORWARD -o v-eth$ue_id -j ACCEPT
+
+  # Configure namespace
   ip netns exec $name ip link set dev lo up
   ip netns exec $name ip addr add 10.$BASE_IP.1.$ue_id/24 dev v-ue$ue_id
   ip netns exec $name ip link set v-ue$ue_id up
+
+  # Add routes in namespace
+  # Default route to host for general connectivity
+  ip netns exec $name ip route add default via 10.$BASE_IP.1.100
+
+  # Explicit route to Docker network subnet through host
+  ip netns exec $name ip route add 192.168.70.128/26 via 10.$BASE_IP.1.100
+
+  # Add route on host to reach namespace
+  ip route add 10.$BASE_IP.1.0/24 dev v-eth$ue_id 2>/dev/null || true
+
+  echo "Namespace $name created with IP 10.$BASE_IP.1.$ue_id"
+  echo "Routes configured for Docker network (192.168.70.128/26)"
+  echo "Docker bridge: $DOCKER_BRIDGE"
 }
 
 delete_namespace() {
   local ue_id=$1
   local name="ue$ue_id"
   echo "deleting namespace for UE ID ${ue_id} name ${name}"
-  ip link delete v-eth$ue_id
-  ip netns delete $name
+
+  # Calculate IP addresses
+  BASE_IP=$((200+ue_id))
+
+  # Find Docker bridge interface
+  DOCKER_BRIDGE=$(docker network inspect demo-oai-public-net --format '{{index .Options "com.docker.network.bridge.name"}}' 2>/dev/null || echo "demo-oai")
+  if [ -z "$DOCKER_BRIDGE" ]; then
+    DOCKER_BRIDGE="demo-oai"
+  fi
+
+  # Remove iptables rules
+  iptables -t nat -D POSTROUTING -s 10.$BASE_IP.1.0/255.255.255.0 -o $DOCKER_BRIDGE -j MASQUERADE 2>/dev/null || true
+  iptables -D FORWARD -i $DOCKER_BRIDGE -o v-eth$ue_id -j ACCEPT 2>/dev/null || true
+  iptables -D FORWARD -o $DOCKER_BRIDGE -i v-eth$ue_id -j ACCEPT 2>/dev/null || true
+  iptables -D FORWARD -i v-eth$ue_id -j ACCEPT 2>/dev/null || true
+  iptables -D FORWARD -o v-eth$ue_id -j ACCEPT 2>/dev/null || true
+
+  # Remove route
+  ip route del 10.$BASE_IP.1.0/24 dev v-eth$ue_id 2>/dev/null || true
+
+  # Delete veth pair and namespace
+  ip link delete v-eth$ue_id 2>/dev/null || true
+  ip netns delete $name 2>/dev/null || true
+
+  echo "Namespace $name deleted"
 }
 
 list_namespaces() {

@@ -103,7 +103,7 @@
     {
       "id": 2,
       "type": "timeseries",
-      "title": "UE3: Loss Percentage & Transfer Rate",
+      "title": "UE2: Loss Percentage & Transfer Rate",
       "gridPos": {
         "x": 0,
         "y": 8,
@@ -156,7 +156,7 @@
             "type": "influxdb",
             "uid": "P951FEA4DE68E13C5"
           },
-          "query": "from(bucket: \"5g-metrics\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"network_metrics\")\n  |> filter(fn: (r) => r[\"ue\"] == \"UE3\")\n  |> filter(fn: (r) => r[\"_field\"] == \"loss_percentage\" or r[\"_field\"] == \"bitrate\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield(name: \"mean\")",
+          "query": "from(bucket: \"5g-metrics\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"network_metrics\")\n  |> filter(fn: (r) => r[\"ue\"] == \"UE2\")\n  |> filter(fn: (r) => r[\"_field\"] == \"loss_percentage\" or r[\"_field\"] == \"bitrate\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield(name: \"mean\")",
           "refId": "A"
         }
       ],

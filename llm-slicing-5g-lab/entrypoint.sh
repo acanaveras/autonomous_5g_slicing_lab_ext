@@ -52,9 +52,9 @@ sleep 5
 ip netns exec ue1 bash -c 'LD_LIBRARY_PATH=. ./openairinterface5g/cmake_targets/ran_build/build/nr-uesoftmodem --rfsimulator.serveraddr 10.201.1.100 -r 106 --numerology 1 --band 78 -C 3619200000 --rfsim --sa -O ran-conf/ue_1.conf -E' > logs/UE1.log 2>&1 &
 
 echo "Starting UE2..."
-./multi_ue.sh -c3 -e &
+./multi_ue.sh -c2 -e &
 sleep 5
-ip netns exec ue3 bash -c 'LD_LIBRARY_PATH=. ./openairinterface5g/cmake_targets/ran_build/build/nr-uesoftmodem --rfsimulator.serveraddr 10.203.1.100 -r 106 --numerology 1 --band 78 -C 3619200000 --rfsim --sa -O ran-conf/ue_2.conf -E' > logs/UE2.log 2>&1 &
+ip netns exec ue2 bash -c 'LD_LIBRARY_PATH=. ./openairinterface5g/cmake_targets/ran_build/build/nr-uesoftmodem --rfsimulator.serveraddr 10.202.1.100 -r 106 --numerology 1 --band 78 -C 3619200000 --rfsim --sa -O ran-conf/ue_2.conf -E' > logs/UE2.log 2>&1 &
 
 echo "Starting iperf servers..."
 docker exec -t oai-ext-dn iperf3 -s -p 5201 > logs/docker_iperfserver1.log 2>&1 &

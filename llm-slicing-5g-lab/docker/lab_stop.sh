@@ -74,10 +74,51 @@ docker compose -f docker-compose-monitoring.yaml down >> "$LOG_FILE" 2>&1 || tru
 log_success "Monitoring Stack stopped"
 echo ""
 
-# Step 2: Stop UE
-log "Step 2: Stopping UE containers..."
-docker compose -f docker-compose-ue-host.yaml down >> "$LOG_FILE" 2>&1 || true
-log_success "UE containers stopped"
+# Step 2: Stop UE processes and clean up namespaces
+log "Step 2: Stopping UE processes and cleaning up namespaces..."
+
+# Kill UE processes
+UE1_PIDS=$(sudo ip netns pids ue1 2>/dev/null || echo "")
+UE2_PIDS=$(sudo ip netns pids ue2 2>/dev/null || echo "")
+
+if [ -n "$UE1_PIDS" ]; then
+    log "Stopping UE1 processes..."
+    for pid in $UE1_PIDS; do
+        sudo kill -9 $pid 2>/dev/null || true
+    done
+    log_success "UE1 processes stopped"
+else
+    log "No UE1 processes running"
+fi
+
+if [ -n "$UE2_PIDS" ]; then
+    log "Stopping UE2 processes..."
+    for pid in $UE2_PIDS; do
+        sudo kill -9 $pid 2>/dev/null || true
+    done
+    log_success "UE2 processes stopped"
+else
+    log "No UE2 processes running"
+fi
+
+sleep 2
+
+# Delete namespaces
+cd ..
+log "Deleting namespace ue1..."
+sudo ./multi_ue.sh -d 1 >> "$LOG_FILE" 2>&1 || true
+log "Deleting namespace ue2..."
+sudo ./multi_ue.sh -d 2 >> "$LOG_FILE" 2>&1 || true
+
+# Verify namespaces are deleted
+if ! ip netns list | grep -q "ue1" && ! ip netns list | grep -q "ue2"; then
+    log_success "UE namespaces cleaned up"
+else
+    log_error "Warning: Some namespaces still exist"
+    ip netns list | grep -E "ue1|ue2" || true
+fi
+
+cd docker
 echo ""
 
 # Step 3: Stop gNodeB and FlexRIC

@@ -62,7 +62,7 @@ except ImportError:
 class ReconfigureNetworkInput(BaseModel):
     """Input schema for network reconfiguration."""
     ue: str = Field(
-        description="User Equipment identifier (UE1 or UE3)"
+        description="User Equipment identifier (UE1 or UE2)"
     )
     value_1_old: int = Field(
         description="Old bandwidth allocation value for slice 1"
